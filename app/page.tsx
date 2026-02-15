@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -33,16 +33,31 @@ const ROUND_LABELS = ["Initial Answers", "Cross Review", "Synthesis"];
 
 export default function DebateArena() {
   const [question, setQuestion] = useState("");
-  const [selectedModels, setSelectedModels] = useState<string[]>(
-    MODELS.map((m) => m.key)
-  );
+  const [availableModels, setAvailableModels] = useState<Record<string, boolean> | null>(null);
+  const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [currentRound, setCurrentRound] = useState(0); // 0 = not started
   const [loading, setLoading] = useState(false);
+
+  // Fetch available models on mount
+  useEffect(() => {
+    fetch("/api/models")
+      .then((res) => res.json())
+      .then((data) => {
+        setAvailableModels(data.available);
+        // Auto-select all available models
+        const keys = Object.entries(data.available as Record<string, boolean>)
+          .filter(([, v]) => v)
+          .map(([k]) => k);
+        setSelectedModels(keys);
+      })
+      .catch(() => setAvailableModels({}));
+  }, []);
   const [round1, setRound1] = useState<Record<string, ModelResponse> | null>(null);
   const [round2, setRound2] = useState<Record<string, ModelResponse> | null>(null);
   const [synthesis, setSynthesis] = useState<ModelResponse | null>(null);
 
   const toggleModel = (key: string) => {
+    if (!availableModels?.[key]) return;
     setSelectedModels((prev) =>
       prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
     );
@@ -168,12 +183,14 @@ export default function DebateArena() {
               </label>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {MODELS.map((model) => {
+                  const isAvailable = availableModels?.[model.key] ?? false;
                   const selected = selectedModels.includes(model.key);
                   return (
                     <button
                       key={model.key}
                       onClick={() => toggleModel(model.key)}
-                      className="group relative rounded-xl border px-4 py-3.5 text-left transition-all duration-300 cursor-pointer"
+                      disabled={!isAvailable}
+                      className="group relative rounded-xl border px-4 py-3.5 text-left transition-all duration-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                       style={{
                         borderColor: selected ? model.color + "55" : "var(--border-dim)",
                         background: selected ? model.glow : "var(--bg-card)",
@@ -195,10 +212,20 @@ export default function DebateArena() {
                           {model.name}
                         </span>
                       </div>
+                      {!isAvailable && (
+                        <span className="text-[10px] font-mono text-[var(--text-muted)] mt-1 block">
+                          No API key
+                        </span>
+                      )}
                     </button>
                   );
                 })}
               </div>
+              {availableModels && Object.values(availableModels).every((v) => !v) && (
+                <p className="text-sm text-red-400 mt-3 font-mono">
+                  No API keys configured. Add them in Vercel → Settings → Environment Variables.
+                </p>
+              )}
             </div>
 
             {/* Start Button */}
