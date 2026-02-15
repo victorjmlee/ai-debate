@@ -60,6 +60,13 @@ export default function DebateArena() {
   const [deepLoading, setDeepLoading] = useState(false);
   const [deepStep, setDeepStep] = useState<"idle" | "review" | "synthesis" | "done">("idle");
 
+  // Synthesis chat
+  const [synthesisChatHistory, setSynthesisChatHistory] = useState<ChatMessage[]>([]);
+  const [synthesisChatInput, setSynthesisChatInput] = useState("");
+  const [synthesisChatLoading, setSynthesisChatLoading] = useState(false);
+  const synthesisChatEndRef = useRef<HTMLDivElement>(null);
+  const synthesisChatInputRef = useRef<HTMLTextAreaElement>(null);
+
   // Fetch available models
   useEffect(() => {
     fetch("/api/models")
@@ -80,6 +87,11 @@ export default function DebateArena() {
       chatEndRefs.current[activeChatModel]?.scrollIntoView({ behavior: "smooth" });
     }
   }, [activeChatModel, chatHistories, chatLoading]);
+
+  // Auto-scroll synthesis chat
+  useEffect(() => {
+    synthesisChatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [synthesisChatHistory.length, synthesisChatLoading]);
 
   // Auto-focus chat input when activating a card
   useEffect(() => {
@@ -192,6 +204,52 @@ export default function DebateArena() {
     }
   };
 
+  // ─── Synthesis Chat ────────────────────────────────────────────────────────
+
+  const initSynthesisChat = () => {
+    if (synthesisChatHistory.length > 0) return; // already initialized
+    if (!synthesis) return;
+    setSynthesisChatHistory([
+      { role: "user", content: `다음은 여러 AI의 답변을 종합 분석한 결과입니다:\n\n${synthesis.answer}` },
+      { role: "assistant", content: synthesis.answer },
+    ]);
+    setTimeout(() => synthesisChatInputRef.current?.focus(), 200);
+  };
+
+  const sendSynthesisChat = async () => {
+    const input = synthesisChatInput.trim();
+    if (!input || synthesisChatLoading) return;
+
+    const userMsg: ChatMessage = { role: "user", content: input };
+    const updatedHistory = [...synthesisChatHistory, userMsg];
+    setSynthesisChatHistory(updatedHistory);
+    setSynthesisChatInput("");
+    setSynthesisChatLoading(true);
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "synthesis", messages: updatedHistory }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "요청 실패");
+
+      setSynthesisChatHistory((prev) => [
+        ...prev,
+        { role: "assistant", content: data.response?.answer ?? "" },
+      ]);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "알 수 없는 에러";
+      setSynthesisChatHistory((prev) => [
+        ...prev,
+        { role: "assistant", content: `[Error: ${msg}]` },
+      ]);
+    } finally {
+      setSynthesisChatLoading(false);
+    }
+  };
+
   // ─── Deep Analysis Flow ────────────────────────────────────────────────────
 
   const startDeepAnalysis = async () => {
@@ -269,6 +327,8 @@ export default function DebateArena() {
     setChatHistories({});
     setChatInputs({});
     setDeepStep("idle");
+    setSynthesisChatHistory([]);
+    setSynthesisChatInput("");
   };
 
   // ─── Render ────────────────────────────────────────────────────────────────
@@ -725,8 +785,91 @@ export default function DebateArena() {
                 {synthesis.error ? (
                   <p className="text-red-400 text-sm">{synthesis.error}</p>
                 ) : (
-                  <div className="prose-debate">
-                    <ReactMarkdown>{synthesis.answer}</ReactMarkdown>
+                  <>
+                    <div className="prose-debate">
+                      <ReactMarkdown>{synthesis.answer}</ReactMarkdown>
+                    </div>
+
+                    {/* Synthesis follow-up chat messages */}
+                    {synthesisChatHistory.length > 2 && (
+                      <div className="mt-5 pt-5 border-t space-y-3" style={{ borderColor: "#D4AF3730" }}>
+                        <span className="text-[10px] font-mono tracking-wider uppercase text-[#D4AF3780]">
+                          후속 대화
+                        </span>
+                        {synthesisChatHistory.slice(2).map((msg, j) => (
+                          <div
+                            key={j}
+                            className={`text-sm rounded-lg px-3 py-2 ${
+                              msg.role === "user"
+                                ? "bg-[var(--bg-elevated)] ml-4 text-[var(--text-primary)]"
+                                : "mr-4 border"
+                            }`}
+                            style={msg.role === "assistant" ? { borderColor: "#D4AF3720" } : undefined}
+                          >
+                            {msg.role === "assistant" ? (
+                              <div className="prose-debate text-sm">
+                                <ReactMarkdown>{msg.content}</ReactMarkdown>
+                              </div>
+                            ) : (
+                              <p>{msg.content}</p>
+                            )}
+                          </div>
+                        ))}
+                        {synthesisChatLoading && (
+                          <div className="mr-4 border rounded-lg px-3 py-2" style={{ borderColor: "#D4AF3720" }}>
+                            <TypingIndicator color="#D4AF37" />
+                          </div>
+                        )}
+                        <div ref={synthesisChatEndRef} />
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Synthesis Chat Input */}
+                {!synthesis.error && (
+                  <div className="mt-5 pt-4 border-t" style={{ borderColor: "#D4AF3720" }}>
+                    {synthesisChatHistory.length === 0 && (
+                      <button
+                        onClick={initSynthesisChat}
+                        className="w-full rounded-xl py-3 text-sm font-bold transition-all duration-300 cursor-pointer border-2"
+                        style={{
+                          borderColor: "#D4AF37",
+                          color: "#fff",
+                          background: "linear-gradient(135deg, #D4AF37CC, #D4AF37AA)",
+                          boxShadow: "0 4px 16px rgba(212,175,55,0.3)",
+                        }}
+                      >
+                        Sonnet과 대화하기 →
+                      </button>
+                    )}
+                    {synthesisChatHistory.length > 0 && (
+                      <div className="flex gap-2 items-end">
+                        <textarea
+                          ref={synthesisChatInputRef}
+                          value={synthesisChatInput}
+                          onChange={(e) => setSynthesisChatInput(e.target.value)}
+                          placeholder="종합 분석에 대해 추가 질문..."
+                          rows={1}
+                          className="flex-1 bg-[var(--bg-elevated)] border rounded-lg px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none resize-none"
+                          style={{ borderColor: "#D4AF3730", minHeight: "40px", maxHeight: "80px" }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                              e.preventDefault();
+                              sendSynthesisChat();
+                            }
+                          }}
+                        />
+                        <button
+                          onClick={sendSynthesisChat}
+                          disabled={!synthesisChatInput.trim() || synthesisChatLoading}
+                          className="shrink-0 rounded-lg px-3 py-2.5 text-xs font-bold transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                          style={{ background: "#D4AF37", color: "#fff" }}
+                        >
+                          Send
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
