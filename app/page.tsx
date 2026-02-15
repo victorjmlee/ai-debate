@@ -61,6 +61,7 @@ export default function DebateArena() {
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
   const nextSessionId = useRef(1);
   const sessionsLoaded = useRef(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Compare view
   const [round1, setRound1] = useState<Record<string, ModelResponse> | null>(null);
@@ -425,32 +426,137 @@ export default function DebateArena() {
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="relative z-10 min-h-screen flex flex-col">
-      {/* ── Header ── */}
-      <header className="border-b border-[var(--border-dim)] px-6 py-5">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div className="cursor-pointer" onClick={viewMode !== "input" ? startNew : undefined}>
-            <h1 className="text-2xl font-extrabold tracking-tight">
-              <span className="bg-gradient-to-r from-blue-400 via-emerald-400 to-amber-400 bg-clip-text text-transparent">
-                AI Debate Arena
-              </span>
-            </h1>
-            <p className="text-xs font-mono text-[var(--text-muted)] mt-1 tracking-widest uppercase">
-              Compare · Choose · Chat
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            {viewMode !== "input" && (
-              <button
-                onClick={startNew}
-                className="text-sm font-mono text-[var(--text-muted)] hover:text-[var(--text-primary)] border border-[var(--border-subtle)] rounded-lg px-4 py-2 transition-all hover:border-[var(--text-muted)] cursor-pointer"
-              >
-                + New
-              </button>
-            )}
-          </div>
+    <div className="relative z-10 min-h-screen flex">
+      {/* ── Sidebar ── */}
+      <aside
+        className="fixed top-0 left-0 h-full z-30 flex flex-col border-r border-[var(--border-dim)] bg-[var(--bg-surface)] transition-all duration-300 overflow-hidden"
+        style={{ width: sidebarOpen ? "280px" : "0px" }}
+      >
+        <div className="flex items-center justify-between px-4 py-4 border-b border-[var(--border-dim)] shrink-0">
+          <span className="text-xs font-mono text-[var(--text-muted)] tracking-wider uppercase">이전 대화</span>
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-sm cursor-pointer transition-colors"
+          >
+            ✕
+          </button>
         </div>
-      </header>
+        <div className="px-3 py-3 shrink-0">
+          <button
+            onClick={() => { startNew(); setSidebarOpen(false); }}
+            className="w-full rounded-lg border border-[var(--border-dim)] hover:border-[var(--border-subtle)] px-3 py-2.5 text-sm font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-all cursor-pointer text-left"
+          >
+            + 새 대화
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-3 pb-4 chat-scroll-area">
+          {sessions.length === 0 ? (
+            <p className="text-xs text-[var(--text-muted)] text-center mt-8 font-mono">아직 대화 기록이 없습니다</p>
+          ) : (
+            <div className="space-y-1.5">
+              {sessions.map((session) => {
+                const isActive = session.id === activeSessionId;
+                const hasDeep = session.deepStep === "done";
+                const timeAgo = getTimeAgo(session.timestamp);
+                return (
+                  <div
+                    key={session.id}
+                    className="group rounded-lg px-3 py-2.5 transition-all cursor-pointer"
+                    style={{
+                      background: isActive ? "var(--bg-elevated)" : "transparent",
+                      borderLeft: isActive ? "2px solid var(--text-secondary)" : "2px solid transparent",
+                    }}
+                    onClick={() => { restoreSession(session); setSidebarOpen(false); }}
+                  >
+                    <div className="flex items-start gap-2">
+                      {/* Model dots */}
+                      <div className="flex -space-x-1 shrink-0 mt-1">
+                        {session.selectedModels.slice(0, 3).map((key) => {
+                          const m = getModel(key);
+                          return (
+                            <div
+                              key={key}
+                              className="w-2 h-2 rounded-full"
+                              style={{ background: m?.color ?? "#888" }}
+                            />
+                          );
+                        })}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-[var(--text-primary)] truncate leading-tight">
+                          {session.question}
+                        </p>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          {hasDeep && (
+                            <span className="text-[9px] font-mono text-[#D4AF37]">Deep</span>
+                          )}
+                          <span className="text-[9px] font-mono text-[var(--text-muted)]">
+                            {timeAgo}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteSession(session.id); }}
+                        className="opacity-0 group-hover:opacity-100 text-[var(--text-muted)] hover:text-red-400 transition-all text-[10px] cursor-pointer shrink-0 mt-0.5"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </aside>
+
+      {/* Sidebar overlay (mobile) */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/30 z-20 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* ── Main Content ── */}
+      <div className="flex-1 flex flex-col min-h-screen">
+        {/* ── Header ── */}
+        <header className="border-b border-[var(--border-dim)] px-6 py-5">
+          <div className="max-w-6xl mx-auto flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {/* Sidebar toggle */}
+              {sessions.length > 0 && (
+                <button
+                  onClick={() => setSidebarOpen(!sidebarOpen)}
+                  className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer text-lg"
+                  title="이전 대화"
+                >
+                  ☰
+                </button>
+              )}
+              <div className="cursor-pointer" onClick={viewMode !== "input" ? startNew : undefined}>
+                <h1 className="text-2xl font-extrabold tracking-tight">
+                  <span className="bg-gradient-to-r from-blue-400 via-emerald-400 to-amber-400 bg-clip-text text-transparent">
+                    AI Debate Arena
+                  </span>
+                </h1>
+                <p className="text-xs font-mono text-[var(--text-muted)] mt-1 tracking-widest uppercase">
+                  Compare · Choose · Chat
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              {viewMode !== "input" && (
+                <button
+                  onClick={startNew}
+                  className="text-sm font-mono text-[var(--text-muted)] hover:text-[var(--text-primary)] border border-[var(--border-subtle)] rounded-lg px-4 py-2 transition-all hover:border-[var(--text-muted)] cursor-pointer"
+                >
+                  + New
+                </button>
+              )}
+            </div>
+          </div>
+        </header>
 
       {/* ═══════════════════ INPUT VIEW ═══════════════════ */}
       {viewMode === "input" && (
@@ -552,76 +658,6 @@ export default function DebateArena() {
             ⌘ + Enter
           </p>
 
-          {/* Session History */}
-          {sessions.length > 0 && (
-            <div className="mt-12 pt-8 border-t border-[var(--border-dim)]">
-              <h3 className="text-sm font-mono text-[var(--text-muted)] tracking-wider uppercase mb-4">
-                이전 대화
-              </h3>
-              <div className="space-y-2.5">
-                {sessions.map((session) => {
-                  const modelCount = session.selectedModels.length;
-                  const chatCount = Object.values(session.chatHistories)
-                    .reduce((sum, h) => sum + Math.max(0, h.length - 2), 0);
-                  const hasDeep = session.deepStep === "done";
-                  const timeAgo = getTimeAgo(session.timestamp);
-                  return (
-                    <div
-                      key={session.id}
-                      className="group flex items-center gap-3 bg-[var(--bg-card)] border border-[var(--border-dim)] rounded-xl px-4 py-3.5 hover:border-[var(--border-subtle)] transition-all cursor-pointer"
-                      onClick={() => restoreSession(session)}
-                    >
-                      {/* Model dots */}
-                      <div className="flex -space-x-1 shrink-0">
-                        {session.selectedModels.map((key) => {
-                          const m = getModel(key);
-                          return (
-                            <div
-                              key={key}
-                              className="w-2.5 h-2.5 rounded-full border border-[var(--bg-card)]"
-                              style={{ background: m?.color ?? "#888" }}
-                            />
-                          );
-                        })}
-                      </div>
-                      {/* Question text */}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-[var(--text-primary)] truncate">
-                          {session.question}
-                        </p>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[10px] font-mono text-[var(--text-muted)]">
-                            {modelCount} models
-                          </span>
-                          {chatCount > 0 && (
-                            <span className="text-[10px] font-mono text-[var(--text-muted)]">
-                              · {chatCount} follow-ups
-                            </span>
-                          )}
-                          {hasDeep && (
-                            <span className="text-[10px] font-mono text-[#D4AF37]">
-                              · Deep Analysis
-                            </span>
-                          )}
-                          <span className="text-[10px] font-mono text-[var(--text-muted)]">
-                            · {timeAgo}
-                          </span>
-                        </div>
-                      </div>
-                      {/* Delete button */}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); deleteSession(session.id); }}
-                        className="opacity-0 group-hover:opacity-100 text-[var(--text-muted)] hover:text-red-400 transition-all text-xs cursor-pointer shrink-0 px-1"
-                        title="삭제"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
         </main>
       )}
 
@@ -1051,6 +1087,7 @@ export default function DebateArena() {
           </span>
         </div>
       </footer>
+      </div>
     </div>
   );
 }
