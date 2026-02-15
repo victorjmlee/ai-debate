@@ -28,7 +28,7 @@ interface ModelOption {
 const MODELS: ModelOption[] = [
   { key: "claude-sonnet", name: "Claude Sonnet", color: "#3B82F6", glow: "rgba(59,130,246,0.15)" },
   { key: "claude-opus", name: "Claude Opus", color: "#06B6D4", glow: "rgba(6,182,212,0.15)" },
-  { key: "gpt-4o", name: "GPT-4o", color: "#10B981", glow: "rgba(16,185,129,0.15)" },
+  { key: "gpt-5-mini", name: "GPT-5 Mini", color: "#10B981", glow: "rgba(16,185,129,0.15)" },
   { key: "gemini", name: "Gemini 2.0 Flash", color: "#F59E0B", glow: "rgba(245,158,11,0.15)" },
 ];
 

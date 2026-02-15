@@ -77,26 +77,26 @@ async function askClaude(
   }
 }
 
-async function askGPT4o(prompt: string): Promise<ModelResponse> {
+async function askGPT5Mini(prompt: string): Promise<ModelResponse> {
   const client = getOpenAIClient();
   if (!client)
-    return { modelKey: "gpt-4o", modelName: "GPT-4o", answer: "", error: "API 키 없음" };
+    return { modelKey: "gpt-5-mini", modelName: "GPT-5 Mini", answer: "", error: "API 키 없음" };
 
   try {
     const response = await client.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-5-mini",
       messages: [{ role: "user", content: prompt }],
       max_tokens: 4000,
     });
     return {
-      modelKey: "gpt-4o",
-      modelName: "GPT-4o",
+      modelKey: "gpt-5-mini",
+      modelName: "GPT-5 Mini",
       answer: response.choices[0]?.message?.content ?? "",
       tokensUsed: response.usage?.total_tokens,
     };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { modelKey: "gpt-4o", modelName: "GPT-4o", answer: "", error: msg };
+    return { modelKey: "gpt-5-mini", modelName: "GPT-5 Mini", answer: "", error: msg };
   }
 }
 
@@ -142,8 +142,8 @@ async function askModel(
       return askClaude(prompt, "claude-sonnet");
     case "claude-opus":
       return askClaude(prompt, "claude-opus");
-    case "gpt-4o":
-      return askGPT4o(prompt);
+    case "gpt-5-mini":
+      return askGPT5Mini(prompt);
     case "gemini":
       return askGemini(prompt);
     default:
@@ -210,12 +210,12 @@ export async function POST(request: NextRequest) {
 
       const synthesisPrompt = `여러 AI 모델들의 최종 의견:\n\n${allReviews}\n\n모든 AI들의 의견을 종합하여:\n1. 공통적으로 동의하는 핵심 내용\n2. 각자의 독특한 인사이트\n3. 통합된 최고의 최종 답변\n\n을 작성해주세요. 중복은 제거하고 보완적인 내용을 합쳐주세요.`;
 
-      // Use Claude Sonnet for synthesis, fallback to GPT-4o
+      // Use Claude Sonnet for synthesis, fallback to GPT-5 Mini
       let result: ModelResponse;
       if (process.env.ANTHROPIC_API_KEY) {
         result = await askClaude(synthesisPrompt, "claude-sonnet");
       } else {
-        result = await askGPT4o(synthesisPrompt);
+        result = await askGPT5Mini(synthesisPrompt);
       }
 
       return NextResponse.json({ synthesis: result });

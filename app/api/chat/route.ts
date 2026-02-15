@@ -81,27 +81,27 @@ async function chatClaude(
   }
 }
 
-async function chatGPT4o(messages: ChatMessage[]): Promise<ModelResponse> {
+async function chatGPT5Mini(messages: ChatMessage[]): Promise<ModelResponse> {
   const client = getOpenAIClient();
   if (!client) {
-    return { modelKey: "gpt-4o", modelName: "GPT-4o", answer: "", error: "API 키 없음" };
+    return { modelKey: "gpt-5-mini", modelName: "GPT-5 Mini", answer: "", error: "API 키 없음" };
   }
 
   try {
     const response = await client.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-5-mini",
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
       max_tokens: 4000,
     });
     return {
-      modelKey: "gpt-4o",
-      modelName: "GPT-4o",
+      modelKey: "gpt-5-mini",
+      modelName: "GPT-5 Mini",
       answer: response.choices[0]?.message?.content ?? "",
       tokensUsed: response.usage?.total_tokens,
     };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { modelKey: "gpt-4o", modelName: "GPT-4o", answer: "", error: msg };
+    return { modelKey: "gpt-5-mini", modelName: "GPT-5 Mini", answer: "", error: msg };
   }
 }
 
@@ -170,8 +170,8 @@ export async function POST(request: NextRequest) {
       case "claude-opus":
         response = await chatClaude(messages, "claude-opus");
         break;
-      case "gpt-4o":
-        response = await chatGPT4o(messages);
+      case "gpt-5-mini":
+        response = await chatGPT5Mini(messages);
         break;
       case "gemini":
         response = await chatGemini(messages);
