@@ -48,7 +48,7 @@ export default function DebateArena() {
 
   // Chat view
   const [chatModel, setChatModel] = useState<string | null>(null);
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [chatHistories, setChatHistories] = useState<Record<string, ChatMessage[]>>({});
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -73,6 +73,9 @@ export default function DebateArena() {
       })
       .catch(() => setAvailableModels({}));
   }, []);
+
+  // Active chat history (derived)
+  const chatHistory = chatModel ? chatHistories[chatModel] ?? [] : [];
 
   // Auto-scroll chat
   useEffect(() => {
@@ -104,7 +107,7 @@ export default function DebateArena() {
     setSynthesis(null);
     setDeepStep("idle");
     setChatModel(null);
-    setChatHistory([]);
+    setChatHistories({});
     setLoading(true);
     setViewMode("compare");
 
@@ -129,12 +132,19 @@ export default function DebateArena() {
   // ─── Chat Flow ─────────────────────────────────────────────────────────────
 
   const selectModelForChat = (modelKey: string) => {
-    const initialAnswer = round1?.[modelKey]?.answer ?? "";
     setChatModel(modelKey);
-    setChatHistory([
-      { role: "user", content: question },
-      { role: "assistant", content: initialAnswer },
-    ]);
+    // 기존 대화 내역이 없을 때만 초기화
+    setChatHistories((prev) => {
+      if (prev[modelKey]) return prev;
+      const initialAnswer = round1?.[modelKey]?.answer ?? "";
+      return {
+        ...prev,
+        [modelKey]: [
+          { role: "user", content: question },
+          { role: "assistant", content: initialAnswer },
+        ],
+      };
+    });
     setChatInput("");
     setViewMode("chat");
   };
@@ -142,9 +152,10 @@ export default function DebateArena() {
   const sendChat = async () => {
     if (!chatInput.trim() || !chatModel || chatLoading) return;
 
+    const modelKey = chatModel;
     const userMsg: ChatMessage = { role: "user", content: chatInput.trim() };
     const updatedHistory = [...chatHistory, userMsg];
-    setChatHistory(updatedHistory);
+    setChatHistories((prev) => ({ ...prev, [modelKey]: updatedHistory }));
     setChatInput("");
     setChatLoading(true);
 
@@ -152,21 +163,21 @@ export default function DebateArena() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: chatModel, messages: updatedHistory }),
+        body: JSON.stringify({ model: modelKey, messages: updatedHistory }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "요청 실패");
 
-      setChatHistory((prev) => [
+      setChatHistories((prev) => ({
         ...prev,
-        { role: "assistant", content: data.response?.answer ?? "" },
-      ]);
+        [modelKey]: [...(prev[modelKey] ?? []), { role: "assistant", content: data.response?.answer ?? "" }],
+      }));
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "알 수 없는 에러";
-      setChatHistory((prev) => [
+      setChatHistories((prev) => ({
         ...prev,
-        { role: "assistant", content: `[Error: ${msg}]` },
-      ]);
+        [modelKey]: [...(prev[modelKey] ?? []), { role: "assistant", content: `[Error: ${msg}]` }],
+      }));
     } finally {
       setChatLoading(false);
     }
@@ -174,7 +185,7 @@ export default function DebateArena() {
 
   const backToCompare = () => {
     setViewMode("compare");
-    setChatModel(null);
+    // chatModel은 해제하되 chatHistories는 보존
   };
 
   // ─── Deep Analysis Flow ────────────────────────────────────────────────────
@@ -234,7 +245,7 @@ export default function DebateArena() {
     setRound2(null);
     setSynthesis(null);
     setChatModel(null);
-    setChatHistory([]);
+    setChatHistories({});
     setChatInput("");
     setDeepStep("idle");
   };
@@ -257,20 +268,6 @@ export default function DebateArena() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {viewMode === "chat" && chatModel && (
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border" style={{
-                borderColor: getModel(chatModel)?.color + "40",
-                background: getModel(chatModel)?.glow,
-              }}>
-                <div className="w-2 h-2 rounded-full" style={{
-                  background: getModel(chatModel)?.color,
-                  boxShadow: `0 0 6px ${getModel(chatModel)?.color}80`,
-                }} />
-                <span className="text-xs font-semibold" style={{ color: getModel(chatModel)?.color }}>
-                  {getModel(chatModel)?.name}
-                </span>
-              </div>
-            )}
             {viewMode !== "input" && (
               <button
                 onClick={resetAll}
@@ -501,22 +498,49 @@ export default function DebateArena() {
       {/* ═══════════════════ CHAT VIEW ═══════════════════ */}
       {viewMode === "chat" && chatModel && (
         <main className="flex-1 flex flex-col max-w-3xl mx-auto w-full animate-fade-up">
-          {/* Chat Header */}
-          <div className="px-6 py-3 border-b border-[var(--border-dim)] flex items-center gap-3">
-            <button
-              onClick={backToCompare}
-              className="text-sm font-mono text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
-            >
-              ← 비교로 돌아가기
-            </button>
-            <div className="ml-auto flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full" style={{
-                background: getModel(chatModel)?.color,
-                boxShadow: `0 0 6px ${getModel(chatModel)?.color}80`,
-              }} />
-              <span className="text-xs font-semibold" style={{ color: getModel(chatModel)?.color }}>
-                {getModel(chatModel)?.name}
-              </span>
+          {/* Model Switcher */}
+          <div className="px-6 py-3 border-b border-[var(--border-dim)]">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={backToCompare}
+                className="text-xs font-mono text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer mr-1 shrink-0"
+              >
+                ← 비교
+              </button>
+              <div className="flex gap-1.5 flex-1 justify-center">
+                {selectedModels.map((key) => {
+                  const m = getModel(key);
+                  if (!m) return null;
+                  const isActive = key === chatModel;
+                  const hasHistory = !!chatHistories[key] && chatHistories[key].length > 2;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => selectModelForChat(key)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 cursor-pointer border"
+                      style={{
+                        borderColor: isActive ? m.color + "60" : "var(--border-dim)",
+                        background: isActive ? m.glow : "transparent",
+                        color: isActive ? m.color : "var(--text-muted)",
+                        boxShadow: isActive ? `0 0 12px ${m.color}15` : "none",
+                      }}
+                    >
+                      <div
+                        className="w-1.5 h-1.5 rounded-full transition-all"
+                        style={{
+                          background: isActive ? m.color : "var(--border-subtle)",
+                          boxShadow: isActive ? `0 0 4px ${m.color}80` : "none",
+                        }}
+                      />
+                      <span className="hidden sm:inline">{m.name}</span>
+                      <span className="sm:hidden">{m.provider}</span>
+                      {hasHistory && !isActive && (
+                        <span className="w-1 h-1 rounded-full bg-[var(--text-muted)]" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
