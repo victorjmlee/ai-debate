@@ -177,7 +177,22 @@ export async function POST(request: NextRequest) {
         .map((r) => `=== ${r.modelName} ===\n${r.answer}`)
         .join("\n\n");
 
-      const reviewPrompt = `다른 AI들의 답변:\n\n${allAnswers}\n\n당신의 답변과 비교하여:\n1. 다른 AI들의 좋은 점\n2. 당신 답변의 개선점\n3. 모든 답변을 통합한 최고의 답변\n\n을 작성해주세요.`;
+      const reviewPrompt = `다른 AI들의 답변을 검토해주세요.
+
+${allAnswers}
+
+다음 형식으로 간결하게 작성해주세요:
+
+**다른 AI들의 강점**
+- (각 AI의 좋은 점을 1-2줄씩)
+
+**보완할 점**
+- (놓친 관점이나 개선 가능한 부분)
+
+**통합 의견**
+(모든 답변의 장점을 합친 최적의 답변을 산문체로 작성)
+
+규칙: 이모지 사용 금지. 테이블 사용 금지. 코드블록 사용 금지. 간결한 산문체로 작성.`;
 
       const results = await Promise.all(
         models.map((m) => askModel(m, reviewPrompt))
@@ -196,7 +211,24 @@ export async function POST(request: NextRequest) {
         .map((r) => `=== ${r.modelName}의 최종 의견 ===\n${r.answer}`)
         .join("\n\n");
 
-      const synthesisPrompt = `여러 AI 모델들의 최종 의견:\n\n${allReviews}\n\n모든 AI들의 의견을 종합하여:\n1. 공통적으로 동의하는 핵심 내용\n2. 각자의 독특한 인사이트\n3. 통합된 최고의 최종 답변\n\n을 작성해주세요. 중복은 제거하고 보완적인 내용을 합쳐주세요.`;
+      const synthesisPrompt = `여러 AI 모델들의 교차 리뷰 결과를 종합해주세요.
+
+${allReviews}
+
+다음 형식으로 작성해주세요:
+
+**공통 합의**
+(모든 AI가 동의하는 핵심 내용을 2-3문장으로)
+
+**각 AI의 고유 인사이트**
+- Claude: (한 줄 요약)
+- GPT: (한 줄 요약)
+- Gemini: (한 줄 요약)
+
+**최종 통합 답변**
+(중복을 제거하고 각 AI의 장점을 합친 최적의 답변. 산문체로 명확하게 작성.)
+
+규칙: 이모지 사용 금지. 테이블 사용 금지. 코드블록 사용 금지. 원본 답변을 그대로 복사하지 말고, 핵심만 추출하여 간결하게 재구성.`;
 
       // Use Claude Haiku for synthesis, fallback to GPT-5 Mini
       let result: ModelResponse;
