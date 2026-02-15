@@ -26,6 +26,19 @@ interface ModelOption {
   glow: string;
 }
 
+interface Session {
+  id: number;
+  question: string;
+  selectedModels: string[];
+  round1: Record<string, ModelResponse> | null;
+  round2: Record<string, ModelResponse> | null;
+  synthesis: ModelResponse | null;
+  chatHistories: Record<string, ChatMessage[]>;
+  synthesisChatHistory: ChatMessage[];
+  deepStep: "idle" | "review" | "synthesis" | "done";
+  timestamp: number;
+}
+
 const MODELS: ModelOption[] = [
   { key: "claude-haiku", name: "Claude Haiku 4.5", provider: "Anthropic", color: "#3B82F6", glow: "rgba(59,130,246,0.15)" },
   { key: "gpt-5-mini", name: "GPT-5 Mini", provider: "OpenAI", color: "#10B981", glow: "rgba(16,185,129,0.15)" },
@@ -42,6 +55,11 @@ export default function DebateArena() {
   const [availableModels, setAvailableModels] = useState<Record<string, boolean> | null>(null);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // Session history
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
+  const nextSessionId = useRef(1);
 
   // Compare view
   const [round1, setRound1] = useState<Record<string, ModelResponse> | null>(null);
@@ -113,6 +131,9 @@ export default function DebateArena() {
 
   const startCompare = async () => {
     if (!question.trim() || selectedModels.length === 0) return;
+    // Assign a new session ID for this comparison
+    const newId = nextSessionId.current++;
+    setActiveSessionId(newId);
     setRound1(null);
     setRound2(null);
     setSynthesis(null);
@@ -120,6 +141,8 @@ export default function DebateArena() {
     setActiveChatModel(null);
     setChatHistories({});
     setChatInputs({});
+    setSynthesisChatHistory([]);
+    setSynthesisChatInput("");
     setLoading(true);
     setViewMode("compare");
 
@@ -315,9 +338,53 @@ export default function DebateArena() {
     }
   };
 
-  // ─── Reset ─────────────────────────────────────────────────────────────────
+  // ─── Session Management ─────────────────────────────────────────────────────
 
-  const resetAll = () => {
+  const saveCurrentSession = () => {
+    if (!round1 || !question.trim()) return null;
+    const session: Session = {
+      id: activeSessionId ?? nextSessionId.current++,
+      question,
+      selectedModels,
+      round1,
+      round2,
+      synthesis,
+      chatHistories: { ...chatHistories },
+      synthesisChatHistory: [...synthesisChatHistory],
+      deepStep,
+      timestamp: Date.now(),
+    };
+    setSessions((prev) => {
+      const filtered = prev.filter((s) => s.id !== session.id);
+      return [session, ...filtered];
+    });
+    return session.id;
+  };
+
+  const restoreSession = (session: Session) => {
+    setQuestion(session.question);
+    setSelectedModels(session.selectedModels);
+    setRound1(session.round1);
+    setRound2(session.round2);
+    setSynthesis(session.synthesis);
+    setChatHistories(session.chatHistories);
+    setSynthesisChatHistory(session.synthesisChatHistory);
+    setDeepStep(session.deepStep);
+    setActiveChatModel(null);
+    setChatInputs({});
+    setSynthesisChatInput("");
+    setActiveSessionId(session.id);
+    setViewMode(session.deepStep !== "idle" ? "deep-analysis" : "compare");
+  };
+
+  const deleteSession = (id: number) => {
+    setSessions((prev) => prev.filter((s) => s.id !== id));
+    if (activeSessionId === id) setActiveSessionId(null);
+  };
+
+  const startNew = () => {
+    // Save current session before clearing
+    saveCurrentSession();
     setViewMode("input");
     setQuestion("");
     setRound1(null);
@@ -329,6 +396,7 @@ export default function DebateArena() {
     setDeepStep("idle");
     setSynthesisChatHistory([]);
     setSynthesisChatInput("");
+    setActiveSessionId(null);
   };
 
   // ─── Render ────────────────────────────────────────────────────────────────
@@ -338,7 +406,7 @@ export default function DebateArena() {
       {/* ── Header ── */}
       <header className="border-b border-[var(--border-dim)] px-6 py-5">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div className="cursor-pointer" onClick={viewMode !== "input" ? resetAll : undefined}>
+          <div className="cursor-pointer" onClick={viewMode !== "input" ? startNew : undefined}>
             <h1 className="text-2xl font-extrabold tracking-tight">
               <span className="bg-gradient-to-r from-blue-400 via-emerald-400 to-amber-400 bg-clip-text text-transparent">
                 AI Debate Arena
@@ -351,7 +419,7 @@ export default function DebateArena() {
           <div className="flex items-center gap-3">
             {viewMode !== "input" && (
               <button
-                onClick={resetAll}
+                onClick={startNew}
                 className="text-sm font-mono text-[var(--text-muted)] hover:text-[var(--text-primary)] border border-[var(--border-subtle)] rounded-lg px-4 py-2 transition-all hover:border-[var(--text-muted)] cursor-pointer"
               >
                 + New
@@ -460,6 +528,77 @@ export default function DebateArena() {
           <p className="text-center text-xs text-[var(--text-muted)] mt-3 font-mono">
             ⌘ + Enter
           </p>
+
+          {/* Session History */}
+          {sessions.length > 0 && (
+            <div className="mt-12 pt-8 border-t border-[var(--border-dim)]">
+              <h3 className="text-sm font-mono text-[var(--text-muted)] tracking-wider uppercase mb-4">
+                이전 대화
+              </h3>
+              <div className="space-y-2.5">
+                {sessions.map((session) => {
+                  const modelCount = session.selectedModels.length;
+                  const chatCount = Object.values(session.chatHistories)
+                    .reduce((sum, h) => sum + Math.max(0, h.length - 2), 0);
+                  const hasDeep = session.deepStep === "done";
+                  const timeAgo = getTimeAgo(session.timestamp);
+                  return (
+                    <div
+                      key={session.id}
+                      className="group flex items-center gap-3 bg-[var(--bg-card)] border border-[var(--border-dim)] rounded-xl px-4 py-3.5 hover:border-[var(--border-subtle)] transition-all cursor-pointer"
+                      onClick={() => restoreSession(session)}
+                    >
+                      {/* Model dots */}
+                      <div className="flex -space-x-1 shrink-0">
+                        {session.selectedModels.map((key) => {
+                          const m = getModel(key);
+                          return (
+                            <div
+                              key={key}
+                              className="w-2.5 h-2.5 rounded-full border border-[var(--bg-card)]"
+                              style={{ background: m?.color ?? "#888" }}
+                            />
+                          );
+                        })}
+                      </div>
+                      {/* Question text */}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-[var(--text-primary)] truncate">
+                          {session.question}
+                        </p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-[10px] font-mono text-[var(--text-muted)]">
+                            {modelCount} models
+                          </span>
+                          {chatCount > 0 && (
+                            <span className="text-[10px] font-mono text-[var(--text-muted)]">
+                              · {chatCount} follow-ups
+                            </span>
+                          )}
+                          {hasDeep && (
+                            <span className="text-[10px] font-mono text-[#D4AF37]">
+                              · Deep Analysis
+                            </span>
+                          )}
+                          <span className="text-[10px] font-mono text-[var(--text-muted)]">
+                            · {timeAgo}
+                          </span>
+                        </div>
+                      </div>
+                      {/* Delete button */}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteSession(session.id); }}
+                        className="opacity-0 group-hover:opacity-100 text-[var(--text-muted)] hover:text-red-400 transition-all text-xs cursor-pointer shrink-0 px-1"
+                        title="삭제"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </main>
       )}
 
@@ -891,6 +1030,18 @@ export default function DebateArena() {
       </footer>
     </div>
   );
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function getTimeAgo(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "방금";
+  if (mins < 60) return `${mins}분 전`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}시간 전`;
+  return `${Math.floor(hours / 24)}일 전`;
 }
 
 // ─── Sub-Components ──────────────────────────────────────────────────────────
