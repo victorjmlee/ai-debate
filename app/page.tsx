@@ -56,10 +56,11 @@ export default function DebateArena() {
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Session history
+  // Session history (persisted to localStorage)
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
   const nextSessionId = useRef(1);
+  const sessionsLoaded = useRef(false);
 
   // Compare view
   const [round1, setRound1] = useState<Record<string, ModelResponse> | null>(null);
@@ -84,6 +85,28 @@ export default function DebateArena() {
   const [synthesisChatLoading, setSynthesisChatLoading] = useState(false);
   const synthesisChatEndRef = useRef<HTMLDivElement>(null);
   const synthesisChatInputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Load sessions from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("ai-debate-sessions");
+      if (saved) {
+        const parsed: Session[] = JSON.parse(saved);
+        setSessions(parsed);
+        const maxId = parsed.reduce((max, s) => Math.max(max, s.id), 0);
+        nextSessionId.current = maxId + 1;
+      }
+    } catch { /* ignore */ }
+    sessionsLoaded.current = true;
+  }, []);
+
+  // Persist sessions to localStorage when they change
+  useEffect(() => {
+    if (!sessionsLoaded.current) return; // skip initial empty state
+    try {
+      localStorage.setItem("ai-debate-sessions", JSON.stringify(sessions));
+    } catch { /* ignore — quota exceeded etc. */ }
+  }, [sessions]);
 
   // Fetch available models
   useEffect(() => {
