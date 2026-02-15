@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -11,6 +11,11 @@ interface ModelResponse {
   answer: string;
   error?: string;
   tokensUsed?: number;
+}
+
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
 }
 
 interface ModelOption {
@@ -27,7 +32,7 @@ const MODELS: ModelOption[] = [
   { key: "gemini", name: "Gemini 2.0 Flash", color: "#F59E0B", glow: "rgba(245,158,11,0.15)" },
 ];
 
-const ROUND_LABELS = ["Initial Answers", "Cross Review", "Synthesis"];
+const STEP_LABELS = ["Initial Answers", "Chat (optional)", "Cross Review", "Synthesis"];
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -38,13 +43,19 @@ export default function DebateArena() {
   const [currentRound, setCurrentRound] = useState(0); // 0 = not started
   const [loading, setLoading] = useState(false);
 
+  // Chat mode states
+  const [chatMode, setChatMode] = useState(false);
+  const [activeChatModel, setActiveChatModel] = useState<string | null>(null);
+  const [chatHistories, setChatHistories] = useState<Record<string, ChatMessage[]>>({});
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+
   // Fetch available models on mount
   useEffect(() => {
     fetch("/api/models")
       .then((res) => res.json())
       .then((data) => {
         setAvailableModels(data.available);
-        // Auto-select all available models
         const keys = Object.entries(data.available as Record<string, boolean>)
           .filter(([, v]) => v)
           .map(([k]) => k);
@@ -52,6 +63,7 @@ export default function DebateArena() {
       })
       .catch(() => setAvailableModels({}));
   }, []);
+
   const [round1, setRound1] = useState<Record<string, ModelResponse> | null>(null);
   const [round2, setRound2] = useState<Record<string, ModelResponse> | null>(null);
   const [synthesis, setSynthesis] = useState<ModelResponse | null>(null);
@@ -99,13 +111,85 @@ export default function DebateArena() {
     setRound1(null);
     setRound2(null);
     setSynthesis(null);
+    setChatMode(false);
+    setActiveChatModel(null);
+    setChatHistories({});
+    setChatInput("");
     setCurrentRound(1);
     const data = await fetchRound(1);
     if (data?.responses) setRound1(data.responses);
   };
 
+  const startChatWith = (modelKey: string) => {
+    setChatMode(true);
+    setActiveChatModel(modelKey);
+    // Initialize history for this model if not exists, seeding with the Round 1 answer
+    setChatHistories((prev) => {
+      if (prev[modelKey]) return prev;
+      const initialAnswer = round1?.[modelKey]?.answer ?? "";
+      return {
+        ...prev,
+        [modelKey]: [
+          { role: "user" as const, content: question },
+          { role: "assistant" as const, content: initialAnswer },
+        ],
+      };
+    });
+  };
+
+  const sendChatMessage = async () => {
+    if (!chatInput.trim() || !activeChatModel || chatLoading) return;
+
+    const userMsg: ChatMessage = { role: "user", content: chatInput.trim() };
+    const modelKey = activeChatModel;
+
+    // Add user message to history
+    setChatHistories((prev) => ({
+      ...prev,
+      [modelKey]: [...(prev[modelKey] ?? []), userMsg],
+    }));
+    setChatInput("");
+    setChatLoading(true);
+
+    try {
+      const currentHistory = [...(chatHistories[modelKey] ?? []), userMsg];
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: modelKey,
+          messages: currentHistory,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "요청 실패");
+
+      const assistantMsg: ChatMessage = {
+        role: "assistant",
+        content: data.response?.answer ?? "",
+      };
+      setChatHistories((prev) => ({
+        ...prev,
+        [modelKey]: [...(prev[modelKey] ?? []), assistantMsg],
+      }));
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "알 수 없는 에러";
+      const errorMsg: ChatMessage = {
+        role: "assistant",
+        content: `[Error: ${msg}]`,
+      };
+      setChatHistories((prev) => ({
+        ...prev,
+        [modelKey]: [...(prev[modelKey] ?? []), errorMsg],
+      }));
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
   const continueToReview = async () => {
     if (!round1) return;
+    setChatMode(false);
     setCurrentRound(2);
     const data = await fetchRound(2, round1);
     if (data?.responses) setRound2(data.responses);
@@ -124,10 +208,28 @@ export default function DebateArena() {
     setRound2(null);
     setSynthesis(null);
     setQuestion("");
+    setChatMode(false);
+    setActiveChatModel(null);
+    setChatHistories({});
+    setChatInput("");
   };
 
   const getModelColor = (key: string) =>
     MODELS.find((m) => m.key === key)?.color ?? "#888";
+
+  const getModelName = (key: string) =>
+    MODELS.find((m) => m.key === key)?.name ?? key;
+
+  // Step indicator mapping: step 1=Initial, 2=Chat, 3=Cross Review, 4=Synthesis
+  const getActiveStep = () => {
+    if (chatMode && currentRound === 1) return 2; // Chat phase
+    if (currentRound === 1) return 1;
+    if (currentRound === 2) return 3;
+    if (currentRound === 3) return 4;
+    return 0;
+  };
+
+  const activeStep = getActiveStep();
 
   return (
     <div className="relative z-10 min-h-screen flex flex-col">
@@ -258,13 +360,13 @@ export default function DebateArena() {
               <p className="text-lg text-[var(--text-primary)] mt-1">{question}</p>
             </div>
 
-            {/* Step Indicator */}
+            {/* Step Indicator (4 steps) */}
             <div className="mb-10">
               <div className="flex items-center gap-2 mb-3">
-                {ROUND_LABELS.map((label, i) => {
-                  const roundNum = i + 1;
-                  const isActive = currentRound === roundNum;
-                  const isCompleted = currentRound > roundNum;
+                {STEP_LABELS.map((label, i) => {
+                  const stepNum = i + 1;
+                  const isActive = activeStep === stepNum;
+                  const isCompleted = activeStep > stepNum;
                   return (
                     <div key={label} className="flex items-center gap-2 flex-1">
                       <div className="flex items-center gap-2 flex-1">
@@ -286,7 +388,7 @@ export default function DebateArena() {
                               : "var(--text-muted)",
                           }}
                         >
-                          {isCompleted ? "✓" : roundNum}
+                          {isCompleted ? "✓" : stepNum}
                         </div>
                         <span
                           className="text-xs font-mono tracking-wider uppercase transition-colors hidden sm:inline"
@@ -301,7 +403,7 @@ export default function DebateArena() {
                           {label}
                         </span>
                       </div>
-                      {i < 2 && (
+                      {i < STEP_LABELS.length - 1 && (
                         <div
                           className="h-px flex-1 transition-colors duration-500 min-w-[20px]"
                           style={{
@@ -324,15 +426,36 @@ export default function DebateArena() {
                 responses={round1}
                 loading={loading && currentRound === 1}
                 getColor={getModelColor}
+                showChatButton={!!round1 && currentRound === 1 && !loading}
+                onStartChat={startChatWith}
+                activeChatModel={activeChatModel}
               />
             )}
 
-            {/* Continue Button */}
-            {round1 && currentRound === 1 && !loading && (
+            {/* Continue / Chat buttons area (only when round 1 is done, not in later rounds) */}
+            {round1 && currentRound === 1 && !loading && !chatMode && (
               <ActionButton
                 onClick={continueToReview}
                 label="Continue to Cross Review"
                 sublabel="Each model reviews the others' answers"
+              />
+            )}
+
+            {/* Chat Panel */}
+            {chatMode && currentRound === 1 && activeChatModel && (
+              <ChatPanel
+                activeChatModel={activeChatModel}
+                chatHistories={chatHistories}
+                chatInput={chatInput}
+                setChatInput={setChatInput}
+                chatLoading={chatLoading}
+                sendChatMessage={sendChatMessage}
+                onSwitchModel={startChatWith}
+                onStartDebate={continueToReview}
+                selectedModels={selectedModels}
+                getModelColor={getModelColor}
+                getModelName={getModelName}
+                loading={loading}
               />
             )}
 
@@ -440,11 +563,17 @@ function RoundSection({
   responses,
   loading,
   getColor,
+  showChatButton,
+  onStartChat,
+  activeChatModel,
 }: {
   title: string;
   responses: Record<string, ModelResponse> | null;
   loading: boolean;
   getColor: (key: string) => string;
+  showChatButton?: boolean;
+  onStartChat?: (modelKey: string) => void;
+  activeChatModel?: string | null;
 }) {
   return (
     <div className="mt-8">
@@ -469,6 +598,9 @@ function RoundSection({
               response={resp}
               color={getColor(resp.modelKey)}
               delay={i * 0.1}
+              showChatButton={showChatButton}
+              onStartChat={onStartChat}
+              isActiveChat={activeChatModel === resp.modelKey}
             />
           ))}
         </div>
@@ -481,10 +613,16 @@ function ResponseCard({
   response,
   color,
   delay = 0,
+  showChatButton,
+  onStartChat,
+  isActiveChat,
 }: {
   response: ModelResponse;
   color: string;
   delay?: number;
+  showChatButton?: boolean;
+  onStartChat?: (modelKey: string) => void;
+  isActiveChat?: boolean;
 }) {
   return (
     <div
@@ -523,6 +661,219 @@ function ResponseCard({
             <ReactMarkdown>{response.answer}</ReactMarkdown>
           </div>
         )}
+
+        {/* Chat Button */}
+        {showChatButton && !response.error && onStartChat && (
+          <button
+            onClick={() => onStartChat(response.modelKey)}
+            className="mt-3 w-full rounded-lg border py-2 text-xs font-mono font-semibold transition-all duration-200 cursor-pointer"
+            style={{
+              borderColor: isActiveChat ? color : color + "40",
+              color: isActiveChat ? "#fff" : color,
+              background: isActiveChat ? color + "20" : "transparent",
+            }}
+          >
+            {isActiveChat ? "Chatting..." : "Chat with this AI"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ChatPanel({
+  activeChatModel,
+  chatHistories,
+  chatInput,
+  setChatInput,
+  chatLoading,
+  sendChatMessage,
+  onSwitchModel,
+  onStartDebate,
+  selectedModels,
+  getModelColor,
+  getModelName,
+  loading,
+}: {
+  activeChatModel: string;
+  chatHistories: Record<string, ChatMessage[]>;
+  chatInput: string;
+  setChatInput: (v: string) => void;
+  chatLoading: boolean;
+  sendChatMessage: () => void;
+  onSwitchModel: (modelKey: string) => void;
+  onStartDebate: () => void;
+  selectedModels: string[];
+  getModelColor: (key: string) => string;
+  getModelName: (key: string) => string;
+  loading: boolean;
+}) {
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const activeColor = getModelColor(activeChatModel);
+  const messages = chatHistories[activeChatModel] ?? [];
+
+  // Skip the initial Q&A pair (already shown in Round 1)
+  const chatMessages = messages.slice(2);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages.length]);
+
+  return (
+    <div className="mt-8 animate-fade-up">
+      <h3 className="text-sm font-mono text-[var(--text-secondary)] tracking-wider uppercase mb-4 flex items-center gap-2">
+        <span
+          className="inline-block w-1.5 h-1.5 rounded-full"
+          style={{ background: activeColor }}
+        />
+        Chat
+      </h3>
+
+      <div
+        className="rounded-xl border overflow-hidden"
+        style={{
+          borderColor: activeColor + "30",
+          background: "var(--bg-card)",
+        }}
+      >
+        {/* Model Tabs */}
+        <div className="flex border-b" style={{ borderColor: "var(--border-dim)" }}>
+          {selectedModels.map((modelKey) => {
+            const isActive = modelKey === activeChatModel;
+            const color = getModelColor(modelKey);
+            const hasHistory = (chatHistories[modelKey]?.length ?? 0) > 2;
+            return (
+              <button
+                key={modelKey}
+                onClick={() => onSwitchModel(modelKey)}
+                className="flex-1 px-4 py-3 text-xs font-mono font-semibold transition-all duration-200 cursor-pointer relative"
+                style={{
+                  color: isActive ? color : "var(--text-muted)",
+                  background: isActive ? color + "08" : "transparent",
+                  borderBottom: isActive ? `2px solid ${color}` : "2px solid transparent",
+                }}
+              >
+                <span className="flex items-center justify-center gap-2">
+                  <span
+                    className="w-1.5 h-1.5 rounded-full"
+                    style={{ background: isActive ? color : "var(--border-subtle)" }}
+                  />
+                  {getModelName(modelKey)}
+                  {hasHistory && (
+                    <span
+                      className="w-1.5 h-1.5 rounded-full"
+                      style={{ background: color + "80" }}
+                      title="Has chat history"
+                    />
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Messages */}
+        <div className="chat-scroll-area px-5 py-4 max-h-[400px] overflow-y-auto">
+          {chatMessages.length === 0 ? (
+            <p className="text-sm text-[var(--text-muted)] text-center py-8 font-mono">
+              Ask a follow-up question to {getModelName(activeChatModel)}
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {chatMessages.map((msg, i) => (
+                <div
+                  key={i}
+                  className={`chat-bubble ${msg.role === "user" ? "chat-bubble-user" : "chat-bubble-ai"}`}
+                  style={
+                    msg.role === "assistant"
+                      ? { borderColor: activeColor + "30" }
+                      : undefined
+                  }
+                >
+                  {msg.role === "assistant" ? (
+                    <div className="prose-debate text-sm">
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    </div>
+                  ) : (
+                    <p className="text-sm">{msg.content}</p>
+                  )}
+                </div>
+              ))}
+              {chatLoading && (
+                <div
+                  className="chat-bubble chat-bubble-ai animate-pulse"
+                  style={{ borderColor: activeColor + "30" }}
+                >
+                  <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
+                    <span
+                      className="inline-block w-1.5 h-1.5 rounded-full animate-bounce"
+                      style={{ background: activeColor }}
+                    />
+                    <span
+                      className="inline-block w-1.5 h-1.5 rounded-full animate-bounce"
+                      style={{ background: activeColor, animationDelay: "0.1s" }}
+                    />
+                    <span
+                      className="inline-block w-1.5 h-1.5 rounded-full animate-bounce"
+                      style={{ background: activeColor, animationDelay: "0.2s" }}
+                    />
+                  </div>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </div>
+
+        {/* Input Area */}
+        <div
+          className="border-t px-4 py-3 flex gap-3 items-end"
+          style={{ borderColor: "var(--border-dim)" }}
+        >
+          <textarea
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            placeholder={`Ask ${getModelName(activeChatModel)} a follow-up...`}
+            rows={1}
+            className="flex-1 bg-[var(--bg-elevated)] border border-[var(--border-dim)] rounded-lg px-4 py-2.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-blue-500/50 resize-none"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendChatMessage();
+              }
+            }}
+          />
+          <button
+            onClick={sendChatMessage}
+            disabled={!chatInput.trim() || chatLoading}
+            className="shrink-0 rounded-lg px-4 py-2.5 text-sm font-semibold transition-all duration-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+            style={{
+              background: activeColor,
+              color: "#fff",
+            }}
+          >
+            Send
+          </button>
+        </div>
+
+        {/* Bottom Action */}
+        <div
+          className="border-t px-4 py-3 flex justify-end"
+          style={{ borderColor: "var(--border-dim)" }}
+        >
+          <button
+            onClick={onStartDebate}
+            disabled={loading}
+            className="rounded-lg border px-5 py-2 text-xs font-mono font-semibold transition-all duration-200 cursor-pointer disabled:opacity-50"
+            style={{
+              borderColor: "var(--border-subtle)",
+              color: "var(--text-secondary)",
+              background: "var(--bg-elevated)",
+            }}
+          >
+            Start Cross Review →
+          </button>
+        </div>
       </div>
     </div>
   );
