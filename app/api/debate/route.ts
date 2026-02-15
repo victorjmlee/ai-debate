@@ -76,7 +76,7 @@ async function askGPT5Mini(prompt: string): Promise<ModelResponse> {
     const response = await client.chat.completions.create({
       model: "gpt-5-mini",
       messages: [{ role: "user", content: prompt }],
-      max_tokens: 4000,
+      max_completion_tokens: 4000,
     });
     return {
       modelKey: "gpt-5-mini",

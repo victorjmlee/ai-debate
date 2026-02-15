@@ -81,7 +81,7 @@ async function chatGPT5Mini(messages: ChatMessage[]): Promise<ModelResponse> {
     const response = await client.chat.completions.create({
       model: "gpt-5-mini",
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
-      max_tokens: 4000,
+      max_completion_tokens: 4000,
     });
     return {
       modelKey: "gpt-5-mini",
