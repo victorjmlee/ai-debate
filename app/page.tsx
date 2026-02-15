@@ -32,7 +32,7 @@ const MODELS: ModelOption[] = [
   { key: "gemini", name: "Gemini 2.5 Flash", provider: "Google", color: "#F59E0B", glow: "rgba(245,158,11,0.15)" },
 ];
 
-type ViewMode = "input" | "compare" | "chat" | "deep-analysis";
+type ViewMode = "input" | "compare" | "deep-analysis";
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -46,13 +46,13 @@ export default function DebateArena() {
   // Compare view
   const [round1, setRound1] = useState<Record<string, ModelResponse> | null>(null);
 
-  // Chat view
-  const [chatModel, setChatModel] = useState<string | null>(null);
+  // Inline chat (within compare view cards)
+  const [activeChatModel, setActiveChatModel] = useState<string | null>(null);
   const [chatHistories, setChatHistories] = useState<Record<string, ChatMessage[]>>({});
-  const [chatInput, setChatInput] = useState("");
-  const [chatLoading, setChatLoading] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  const chatInputRef = useRef<HTMLTextAreaElement>(null);
+  const [chatInputs, setChatInputs] = useState<Record<string, string>>({});
+  const [chatLoading, setChatLoading] = useState<string | null>(null); // modelKey being loaded
+  const chatEndRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const chatInputRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
 
   // Deep Analysis
   const [round2, setRound2] = useState<Record<string, ModelResponse> | null>(null);
@@ -74,20 +74,19 @@ export default function DebateArena() {
       .catch(() => setAvailableModels({}));
   }, []);
 
-  // Active chat history (derived)
-  const chatHistory = chatModel ? chatHistories[chatModel] ?? [] : [];
-
-  // Auto-scroll chat
+  // Auto-scroll chat when messages change
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatHistory.length, chatLoading]);
-
-  // Auto-focus chat input
-  useEffect(() => {
-    if (viewMode === "chat") {
-      setTimeout(() => chatInputRef.current?.focus(), 300);
+    if (activeChatModel) {
+      chatEndRefs.current[activeChatModel]?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [viewMode]);
+  }, [activeChatModel, chatHistories, chatLoading]);
+
+  // Auto-focus chat input when activating a card
+  useEffect(() => {
+    if (activeChatModel) {
+      setTimeout(() => chatInputRefs.current[activeChatModel]?.focus(), 200);
+    }
+  }, [activeChatModel]);
 
   const toggleModel = (key: string) => {
     if (!availableModels?.[key]) return;
@@ -106,8 +105,9 @@ export default function DebateArena() {
     setRound2(null);
     setSynthesis(null);
     setDeepStep("idle");
-    setChatModel(null);
+    setActiveChatModel(null);
     setChatHistories({});
+    setChatInputs({});
     setLoading(true);
     setViewMode("compare");
 
@@ -129,11 +129,11 @@ export default function DebateArena() {
     }
   };
 
-  // ─── Chat Flow ─────────────────────────────────────────────────────────────
+  // ─── Inline Chat ──────────────────────────────────────────────────────────
 
-  const selectModelForChat = (modelKey: string) => {
-    setChatModel(modelKey);
-    // 기존 대화 내역이 없을 때만 초기화
+  const openChat = (modelKey: string) => {
+    setActiveChatModel(modelKey);
+    // Initialize chat history if not present
     setChatHistories((prev) => {
       if (prev[modelKey]) return prev;
       const initialAnswer = round1?.[modelKey]?.answer ?? "";
@@ -145,19 +145,28 @@ export default function DebateArena() {
         ],
       };
     });
-    setChatInput("");
-    setViewMode("chat");
   };
 
-  const sendChat = async () => {
-    if (!chatInput.trim() || !chatModel || chatLoading) return;
+  const closeChat = () => {
+    setActiveChatModel(null);
+  };
 
-    const modelKey = chatModel;
-    const userMsg: ChatMessage = { role: "user", content: chatInput.trim() };
-    const updatedHistory = [...chatHistory, userMsg];
+  const getChatInput = (modelKey: string) => chatInputs[modelKey] ?? "";
+
+  const setChatInput = (modelKey: string, value: string) => {
+    setChatInputs((prev) => ({ ...prev, [modelKey]: value }));
+  };
+
+  const sendChat = async (modelKey: string) => {
+    const input = getChatInput(modelKey).trim();
+    if (!input || chatLoading) return;
+
+    const history = chatHistories[modelKey] ?? [];
+    const userMsg: ChatMessage = { role: "user", content: input };
+    const updatedHistory = [...history, userMsg];
     setChatHistories((prev) => ({ ...prev, [modelKey]: updatedHistory }));
-    setChatInput("");
-    setChatLoading(true);
+    setChatInput(modelKey, "");
+    setChatLoading(modelKey);
 
     try {
       const res = await fetch("/api/chat", {
@@ -179,13 +188,8 @@ export default function DebateArena() {
         [modelKey]: [...(prev[modelKey] ?? []), { role: "assistant", content: `[Error: ${msg}]` }],
       }));
     } finally {
-      setChatLoading(false);
+      setChatLoading(null);
     }
-  };
-
-  const backToCompare = () => {
-    setViewMode("compare");
-    // chatModel은 해제하되 chatHistories는 보존
   };
 
   // ─── Deep Analysis Flow ────────────────────────────────────────────────────
@@ -261,9 +265,9 @@ export default function DebateArena() {
     setRound1(null);
     setRound2(null);
     setSynthesis(null);
-    setChatModel(null);
+    setActiveChatModel(null);
     setChatHistories({});
-    setChatInput("");
+    setChatInputs({});
     setDeepStep("idle");
   };
 
@@ -410,13 +414,6 @@ export default function DebateArena() {
             <p className="text-lg text-[var(--text-primary)] mt-1">{question}</p>
           </div>
 
-          {/* Step Indicator */}
-          <div className="flex items-center gap-3 mb-8">
-            <StepBadge num={1} label="Compare" active />
-            <div className="h-px flex-1 bg-[var(--border-dim)]" />
-            <StepBadge num={2} label="Chat" />
-          </div>
-
           {/* Model Response Cards */}
           {loading ? (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -430,14 +427,20 @@ export default function DebateArena() {
                 {Object.values(round1).map((resp, i) => {
                   const model = getModel(resp.modelKey);
                   const color = model?.color ?? "#888";
+                  const isActive = activeChatModel === resp.modelKey;
+                  const extraMessages = (chatHistories[resp.modelKey] ?? []).slice(2);
+                  const hasHistory = extraMessages.length > 0;
+                  const isLoadingThis = chatLoading === resp.modelKey;
+
                   return (
                     <div
                       key={resp.modelKey}
-                      className="animate-fade-up rounded-xl border overflow-hidden transition-all group"
+                      className="animate-fade-up rounded-xl border overflow-hidden transition-all duration-300 flex flex-col"
                       style={{
-                        borderColor: color + "30",
+                        borderColor: isActive ? color + "60" : color + "30",
                         background: "var(--bg-card)",
                         animationDelay: `${i * 0.1}s`,
+                        boxShadow: isActive ? `0 0 24px ${color}15` : "none",
                       }}
                     >
                       {/* Card Header */}
@@ -463,79 +466,122 @@ export default function DebateArena() {
                         </div>
                       </div>
 
-                      {/* Card Body */}
-                      <div className="px-5 py-4 max-h-[400px] overflow-y-auto chat-scroll-area">
+                      {/* Card Body — scrollable area with initial answer + chat messages */}
+                      <div
+                        className="px-5 py-4 overflow-y-auto chat-scroll-area flex-1 transition-all duration-300"
+                        style={{ maxHeight: isActive ? "500px" : "400px" }}
+                      >
                         {resp.error ? (
                           <div className="rounded-lg bg-red-500/5 border border-red-500/20 px-4 py-3">
                             <p className="text-red-400 text-sm font-mono">{resp.error}</p>
                           </div>
                         ) : (
                           <>
+                            {/* Initial answer */}
                             <div className="prose-debate text-sm">
                               <ReactMarkdown>{resp.answer}</ReactMarkdown>
                             </div>
-                            {/* 추가 대화 내역 표시 */}
-                            {(() => {
-                              const extra = (chatHistories[resp.modelKey] ?? []).slice(2);
-                              if (extra.length === 0) return null;
-                              return (
-                                <div className="mt-4 pt-4 border-t space-y-2.5" style={{ borderColor: color + "20" }}>
-                                  <span className="text-[10px] font-mono tracking-wider uppercase" style={{ color: color + "80" }}>
-                                    대화 계속됨
-                                  </span>
-                                  {extra.map((msg, j) => (
-                                    <div
-                                      key={j}
-                                      className={`text-sm rounded-lg px-3 py-2 ${
-                                        msg.role === "user"
-                                          ? "bg-[var(--bg-elevated)] ml-4 text-[var(--text-primary)]"
-                                          : "mr-4 border"
-                                      }`}
-                                      style={msg.role === "assistant" ? { borderColor: color + "20" } : undefined}
-                                    >
-                                      {msg.role === "assistant" ? (
-                                        <div className="prose-debate text-sm">
-                                          <ReactMarkdown>{msg.content}</ReactMarkdown>
-                                        </div>
-                                      ) : (
-                                        <p>{msg.content}</p>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              );
-                            })()}
+
+                            {/* Chat messages (follow-up Q&A) */}
+                            {extraMessages.length > 0 && (
+                              <div className="mt-4 pt-4 border-t space-y-2.5" style={{ borderColor: color + "20" }}>
+                                <span className="text-[10px] font-mono tracking-wider uppercase" style={{ color: color + "80" }}>
+                                  후속 대화
+                                </span>
+                                {extraMessages.map((msg, j) => (
+                                  <div
+                                    key={j}
+                                    className={`text-sm rounded-lg px-3 py-2 ${
+                                      msg.role === "user"
+                                        ? "bg-[var(--bg-elevated)] ml-4 text-[var(--text-primary)]"
+                                        : "mr-4 border"
+                                    }`}
+                                    style={msg.role === "assistant" ? { borderColor: color + "20" } : undefined}
+                                  >
+                                    {msg.role === "assistant" ? (
+                                      <div className="prose-debate text-sm">
+                                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                                      </div>
+                                    ) : (
+                                      <p>{msg.content}</p>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Typing indicator */}
+                            {isLoadingThis && (
+                              <div className="mt-3 mr-4 border rounded-lg px-3 py-2" style={{ borderColor: color + "20" }}>
+                                <TypingIndicator color={color} />
+                              </div>
+                            )}
+
+                            {/* Scroll anchor */}
+                            <div ref={(el) => { chatEndRefs.current[resp.modelKey] = el; }} />
                           </>
                         )}
                       </div>
 
-                      {/* CTA Button */}
+                      {/* CTA / Chat Input Area */}
                       {!resp.error && (
-                        <div className="px-5 pb-4">
-                          {(chatHistories[resp.modelKey]?.length ?? 0) > 2 ? (
-                            <button
-                              onClick={() => selectModelForChat(resp.modelKey)}
-                              className="w-full rounded-xl py-3 text-sm font-bold transition-all duration-300 cursor-pointer border"
-                              style={{
-                                borderColor: color + "60",
-                                color: color,
-                                background: getModel(resp.modelKey)?.glow ?? "transparent",
-                              }}
-                            >
-                              대화 이어가기 →
-                            </button>
+                        <div className="px-5 pb-4 pt-2">
+                          {isActive ? (
+                            /* ── Inline Chat Input ── */
+                            <div>
+                              <div className="flex gap-2 items-end">
+                                <textarea
+                                  ref={(el) => { chatInputRefs.current[resp.modelKey] = el; }}
+                                  value={getChatInput(resp.modelKey)}
+                                  onChange={(e) => setChatInput(resp.modelKey, e.target.value)}
+                                  placeholder="후속 질문..."
+                                  rows={1}
+                                  className="flex-1 bg-[var(--bg-elevated)] border border-[var(--border-dim)] rounded-lg px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-opacity-50 resize-none"
+                                  style={{ focusBorderColor: color, minHeight: "40px", maxHeight: "80px" }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                                      e.preventDefault();
+                                      sendChat(resp.modelKey);
+                                    }
+                                  }}
+                                />
+                                <button
+                                  onClick={() => sendChat(resp.modelKey)}
+                                  disabled={!getChatInput(resp.modelKey).trim() || !!chatLoading}
+                                  className="shrink-0 rounded-lg px-3 py-2.5 text-xs font-bold transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                                  style={{ background: color, color: "#fff" }}
+                                >
+                                  Send
+                                </button>
+                              </div>
+                              <button
+                                onClick={closeChat}
+                                className="mt-2 text-[10px] font-mono text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors cursor-pointer w-full text-center"
+                              >
+                                닫기
+                              </button>
+                            </div>
                           ) : (
+                            /* ── CTA Button ── */
                             <button
-                              onClick={() => selectModelForChat(resp.modelKey)}
-                              className="w-full rounded-xl py-3 text-sm font-bold transition-all duration-300 cursor-pointer border-2"
-                              style={{
-                                borderColor: color,
-                                color: "#fff",
-                                background: `linear-gradient(135deg, ${color}CC, ${color}AA)`,
-                                boxShadow: `0 4px 16px ${color}30`,
-                              }}
+                              onClick={() => openChat(resp.modelKey)}
+                              className="w-full rounded-xl py-3 text-sm font-bold transition-all duration-300 cursor-pointer border"
+                              style={
+                                hasHistory
+                                  ? {
+                                      borderColor: color + "60",
+                                      color: color,
+                                      background: model?.glow ?? "transparent",
+                                    }
+                                  : {
+                                      borderColor: color,
+                                      color: "#fff",
+                                      background: `linear-gradient(135deg, ${color}CC, ${color}AA)`,
+                                      boxShadow: `0 4px 16px ${color}30`,
+                                    }
+                              }
                             >
-                              이 AI와 대화하기 →
+                              {hasHistory ? "대화 이어가기 →" : "이 AI와 대화하기 →"}
                             </button>
                           )}
                         </div>
@@ -556,126 +602,6 @@ export default function DebateArena() {
               </div>
             </>
           ) : null}
-        </main>
-      )}
-
-      {/* ═══════════════════ CHAT VIEW ═══════════════════ */}
-      {viewMode === "chat" && chatModel && (
-        <main className="flex-1 flex flex-col max-w-3xl mx-auto w-full animate-fade-up">
-          {/* Model Switcher */}
-          <div className="px-6 py-3 border-b border-[var(--border-dim)]">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={backToCompare}
-                className="text-xs font-mono text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer mr-1 shrink-0"
-              >
-                ← 비교
-              </button>
-              <div className="flex gap-1.5 flex-1 justify-center">
-                {selectedModels.map((key) => {
-                  const m = getModel(key);
-                  if (!m) return null;
-                  const isActive = key === chatModel;
-                  const hasHistory = !!chatHistories[key] && chatHistories[key].length > 2;
-                  return (
-                    <button
-                      key={key}
-                      onClick={() => selectModelForChat(key)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-200 cursor-pointer border"
-                      style={{
-                        borderColor: isActive ? m.color + "60" : "var(--border-dim)",
-                        background: isActive ? m.glow : "transparent",
-                        color: isActive ? m.color : "var(--text-muted)",
-                        boxShadow: isActive ? `0 0 12px ${m.color}15` : "none",
-                      }}
-                    >
-                      <div
-                        className="w-1.5 h-1.5 rounded-full transition-all"
-                        style={{
-                          background: isActive ? m.color : "var(--border-subtle)",
-                          boxShadow: isActive ? `0 0 4px ${m.color}80` : "none",
-                        }}
-                      />
-                      <span className="hidden sm:inline">{m.name}</span>
-                      <span className="sm:hidden">{m.provider}</span>
-                      {hasHistory && !isActive && (
-                        <span className="w-1 h-1 rounded-full bg-[var(--text-muted)]" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-
-          {/* Chat Messages */}
-          <div className="flex-1 overflow-y-auto px-6 py-6 chat-scroll-area">
-            <div className="space-y-4">
-              {chatHistory.map((msg, i) => (
-                <div
-                  key={i}
-                  className={`chat-bubble ${msg.role === "user" ? "chat-bubble-user" : "chat-bubble-ai"}`}
-                  style={msg.role === "assistant" ? { borderColor: (getModel(chatModel)?.color ?? "#888") + "30" } : undefined}
-                >
-                  {msg.role === "assistant" ? (
-                    <div className="prose-debate text-sm">
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
-                    </div>
-                  ) : (
-                    <p className="text-sm">{msg.content}</p>
-                  )}
-                </div>
-              ))}
-              {chatLoading && (
-                <div
-                  className="chat-bubble chat-bubble-ai animate-pulse"
-                  style={{ borderColor: (getModel(chatModel)?.color ?? "#888") + "30" }}
-                >
-                  <TypingIndicator color={getModel(chatModel)?.color ?? "#888"} />
-                </div>
-              )}
-              <div ref={chatEndRef} />
-            </div>
-          </div>
-
-          {/* Chat Input */}
-          <div className="border-t border-[var(--border-dim)] px-6 py-4">
-            <div className="flex gap-3 items-end">
-              <textarea
-                ref={chatInputRef}
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                placeholder="후속 질문을 입력하세요..."
-                rows={1}
-                className="flex-1 bg-[var(--bg-card)] border border-[var(--border-dim)] rounded-xl px-4 py-3 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-blue-500/50 resize-none"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                    e.preventDefault();
-                    sendChat();
-                  }
-                }}
-                style={{
-                  minHeight: "44px",
-                  maxHeight: "120px",
-                }}
-              />
-              <button
-                onClick={sendChat}
-                disabled={!chatInput.trim() || chatLoading}
-                className="shrink-0 rounded-xl px-5 py-3 text-sm font-bold transition-all duration-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-                style={{
-                  background: getModel(chatModel)?.color,
-                  color: "#fff",
-                  boxShadow: `0 2px 12px ${getModel(chatModel)?.color}40`,
-                }}
-              >
-                Send
-              </button>
-            </div>
-            <p className="text-[10px] text-[var(--text-muted)] mt-2 font-mono text-center">
-              Enter to send · Shift + Enter for new line
-            </p>
-          </div>
         </main>
       )}
 
