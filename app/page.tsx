@@ -525,15 +525,13 @@ export default function DebateArena() {
           <div className="max-w-6xl mx-auto flex items-center justify-between">
             <div className="flex items-center gap-3">
               {/* Sidebar toggle */}
-              {sessions.length > 0 && (
-                <button
-                  onClick={() => setSidebarOpen(!sidebarOpen)}
-                  className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer text-lg"
-                  title="이전 대화"
-                >
-                  ☰
-                </button>
-              )}
+              <button
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer text-lg"
+                title="이전 대화"
+              >
+                ☰
+              </button>
               <div className="cursor-pointer" onClick={viewMode !== "input" ? startNew : undefined}>
                 <h1 className="text-2xl font-extrabold tracking-tight">
                   <span className="bg-gradient-to-r from-blue-400 via-emerald-400 to-amber-400 bg-clip-text text-transparent">
