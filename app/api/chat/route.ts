@@ -45,39 +45,29 @@ function getGeminiClient() {
 
 // ─── Model Callers ───────────────────────────────────────────────────────────
 
-async function chatClaude(
-  messages: ChatMessage[],
-  model: string
-): Promise<ModelResponse> {
+async function chatClaudeHaiku(messages: ChatMessage[]): Promise<ModelResponse> {
   const client = getAnthropicClient();
   if (!client) {
-    return { modelKey: model, modelName: "Claude", answer: "", error: "API 키 없음" };
+    return { modelKey: "claude-haiku", modelName: "Claude Haiku", answer: "", error: "API 키 없음" };
   }
-
-  const modelId =
-    model === "claude-opus"
-      ? "claude-opus-4-20250514"
-      : "claude-sonnet-4-20250514";
-  const displayName =
-    model === "claude-opus" ? "Claude Opus" : "Claude Sonnet";
 
   try {
     const response = await client.messages.create({
-      model: modelId,
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 4000,
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
     });
     const text =
       response.content[0].type === "text" ? response.content[0].text : "";
     return {
-      modelKey: model,
-      modelName: displayName,
+      modelKey: "claude-haiku",
+      modelName: "Claude Haiku",
       answer: text,
       tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
     };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { modelKey: model, modelName: displayName, answer: "", error: msg };
+    return { modelKey: "claude-haiku", modelName: "Claude Haiku", answer: "", error: msg };
   }
 }
 
@@ -110,7 +100,7 @@ async function chatGemini(messages: ChatMessage[]): Promise<ModelResponse> {
   if (!client) {
     return {
       modelKey: "gemini",
-      modelName: "Gemini 2.0 Flash",
+      modelName: "Gemini 2.5 Flash",
       answer: "",
       error: "API 키 없음",
     };
@@ -128,19 +118,19 @@ async function chatGemini(messages: ChatMessage[]): Promise<ModelResponse> {
         : lastUserMsg.content;
 
     const response = await client.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
     });
     return {
       modelKey: "gemini",
-      modelName: "Gemini 2.0 Flash",
+      modelName: "Gemini 2.5 Flash",
       answer: response.text ?? "",
     };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     return {
       modelKey: "gemini",
-      modelName: "Gemini 2.0 Flash",
+      modelName: "Gemini 2.5 Flash",
       answer: "",
       error: msg,
     };
@@ -164,11 +154,8 @@ export async function POST(request: NextRequest) {
     let response: ModelResponse;
 
     switch (model) {
-      case "claude-sonnet":
-        response = await chatClaude(messages, "claude-sonnet");
-        break;
-      case "claude-opus":
-        response = await chatClaude(messages, "claude-opus");
+      case "claude-haiku":
+        response = await chatClaudeHaiku(messages);
         break;
       case "gpt-5-mini":
         response = await chatGPT5Mini(messages);

@@ -13,9 +13,8 @@
   --text-secondary: #8888A8;
   --text-muted: #555570;
 
-  --claude-sonnet: #3B82F6;
-  --claude-opus: #06B6D4;
-  --gpt4o: #10B981;
+  --claude-haiku: #3B82F6;
+  --gpt5-mini: #10B981;
   --gemini: #F59E0B;
   --synthesis: #D4AF37;
 }

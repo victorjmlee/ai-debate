@@ -26,10 +26,9 @@ interface ModelOption {
 }
 
 const MODELS: ModelOption[] = [
-  { key: "claude-sonnet", name: "Claude Sonnet", color: "#3B82F6", glow: "rgba(59,130,246,0.15)" },
-  { key: "claude-opus", name: "Claude Opus", color: "#06B6D4", glow: "rgba(6,182,212,0.15)" },
+  { key: "claude-haiku", name: "Claude Haiku 4.5", color: "#3B82F6", glow: "rgba(59,130,246,0.15)" },
   { key: "gpt-5-mini", name: "GPT-5 Mini", color: "#10B981", glow: "rgba(16,185,129,0.15)" },
-  { key: "gemini", name: "Gemini 2.0 Flash", color: "#F59E0B", glow: "rgba(245,158,11,0.15)" },
+  { key: "gemini", name: "Gemini 2.5 Flash", color: "#F59E0B", glow: "rgba(245,158,11,0.15)" },
 ];
 
 const STEP_LABELS = ["Initial Answers", "Chat (optional)", "Cross Review", "Synthesis"];
@@ -247,7 +246,7 @@ export default function DebateArena() {
               </span>
             </h1>
             <p className="text-xs font-mono text-[var(--text-muted)] mt-1 tracking-widest uppercase">
-              Claude · GPT-4o · Gemini
+              Claude · GPT · Gemini
             </p>
           </div>
           {currentRound > 0 && (

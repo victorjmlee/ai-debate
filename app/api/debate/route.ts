@@ -42,38 +42,28 @@ function getGeminiClient() {
 
 // ─── Model Callers ───────────────────────────────────────────────────────────
 
-async function askClaude(
-  prompt: string,
-  model: string
-): Promise<ModelResponse> {
+async function askClaudeHaiku(prompt: string): Promise<ModelResponse> {
   const client = getAnthropicClient();
   if (!client)
-    return { modelKey: model, modelName: "Claude", answer: "", error: "API 키 없음" };
-
-  const modelId =
-    model === "claude-opus"
-      ? "claude-opus-4-20250514"
-      : "claude-sonnet-4-20250514";
-  const displayName =
-    model === "claude-opus" ? "Claude Opus" : "Claude Sonnet";
+    return { modelKey: "claude-haiku", modelName: "Claude Haiku", answer: "", error: "API 키 없음" };
 
   try {
     const response = await client.messages.create({
-      model: modelId,
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 4000,
       messages: [{ role: "user", content: prompt }],
     });
     const text =
       response.content[0].type === "text" ? response.content[0].text : "";
     return {
-      modelKey: model,
-      modelName: displayName,
+      modelKey: "claude-haiku",
+      modelName: "Claude Haiku",
       answer: text,
       tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
     };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { modelKey: model, modelName: displayName, answer: "", error: msg };
+    return { modelKey: "claude-haiku", modelName: "Claude Haiku", answer: "", error: msg };
   }
 }
 
@@ -105,26 +95,26 @@ async function askGemini(prompt: string): Promise<ModelResponse> {
   if (!client)
     return {
       modelKey: "gemini",
-      modelName: "Gemini 2.0 Flash",
+      modelName: "Gemini 2.5 Flash",
       answer: "",
       error: "API 키 없음",
     };
 
   try {
     const response = await client.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       contents: prompt,
     });
     return {
       modelKey: "gemini",
-      modelName: "Gemini 2.0 Flash",
+      modelName: "Gemini 2.5 Flash",
       answer: response.text ?? "",
     };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     return {
       modelKey: "gemini",
-      modelName: "Gemini 2.0 Flash",
+      modelName: "Gemini 2.5 Flash",
       answer: "",
       error: msg,
     };
@@ -138,10 +128,8 @@ async function askModel(
   prompt: string
 ): Promise<ModelResponse> {
   switch (modelKey) {
-    case "claude-sonnet":
-      return askClaude(prompt, "claude-sonnet");
-    case "claude-opus":
-      return askClaude(prompt, "claude-opus");
+    case "claude-haiku":
+      return askClaudeHaiku(prompt);
     case "gpt-5-mini":
       return askGPT5Mini(prompt);
     case "gemini":
@@ -210,10 +198,10 @@ export async function POST(request: NextRequest) {
 
       const synthesisPrompt = `여러 AI 모델들의 최종 의견:\n\n${allReviews}\n\n모든 AI들의 의견을 종합하여:\n1. 공통적으로 동의하는 핵심 내용\n2. 각자의 독특한 인사이트\n3. 통합된 최고의 최종 답변\n\n을 작성해주세요. 중복은 제거하고 보완적인 내용을 합쳐주세요.`;
 
-      // Use Claude Sonnet for synthesis, fallback to GPT-5 Mini
+      // Use Claude Haiku for synthesis, fallback to GPT-5 Mini
       let result: ModelResponse;
       if (process.env.ANTHROPIC_API_KEY) {
-        result = await askClaude(synthesisPrompt, "claude-sonnet");
+        result = await askClaudeHaiku(synthesisPrompt);
       } else {
         result = await askGPT5Mini(synthesisPrompt);
       }
