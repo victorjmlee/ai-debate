@@ -301,7 +301,7 @@ export default function DebateArena() {
               rows={4}
               className="w-full bg-[var(--bg-card)] border border-[var(--border-dim)] rounded-xl px-5 py-4 text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all resize-none text-lg"
               onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) startCompare();
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) startCompare();
               }}
             />
           </div>
@@ -447,33 +447,80 @@ export default function DebateArena() {
                       </div>
 
                       {/* Card Body */}
-                      <div className="px-5 py-4">
+                      <div className="px-5 py-4 max-h-[400px] overflow-y-auto chat-scroll-area">
                         {resp.error ? (
                           <div className="rounded-lg bg-red-500/5 border border-red-500/20 px-4 py-3">
                             <p className="text-red-400 text-sm font-mono">{resp.error}</p>
                           </div>
                         ) : (
-                          <div className="prose-debate text-sm max-h-[350px] overflow-y-auto pr-2 chat-scroll-area">
-                            <ReactMarkdown>{resp.answer}</ReactMarkdown>
-                          </div>
+                          <>
+                            <div className="prose-debate text-sm">
+                              <ReactMarkdown>{resp.answer}</ReactMarkdown>
+                            </div>
+                            {/* 추가 대화 내역 표시 */}
+                            {(() => {
+                              const extra = (chatHistories[resp.modelKey] ?? []).slice(2);
+                              if (extra.length === 0) return null;
+                              return (
+                                <div className="mt-4 pt-4 border-t space-y-2.5" style={{ borderColor: color + "20" }}>
+                                  <span className="text-[10px] font-mono tracking-wider uppercase" style={{ color: color + "80" }}>
+                                    대화 계속됨
+                                  </span>
+                                  {extra.map((msg, j) => (
+                                    <div
+                                      key={j}
+                                      className={`text-sm rounded-lg px-3 py-2 ${
+                                        msg.role === "user"
+                                          ? "bg-[var(--bg-elevated)] ml-4 text-[var(--text-primary)]"
+                                          : "mr-4 border"
+                                      }`}
+                                      style={msg.role === "assistant" ? { borderColor: color + "20" } : undefined}
+                                    >
+                                      {msg.role === "assistant" ? (
+                                        <div className="prose-debate text-sm">
+                                          <ReactMarkdown>{msg.content}</ReactMarkdown>
+                                        </div>
+                                      ) : (
+                                        <p>{msg.content}</p>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            })()}
+                          </>
                         )}
                       </div>
 
                       {/* CTA Button */}
                       {!resp.error && (
                         <div className="px-5 pb-4">
-                          <button
-                            onClick={() => selectModelForChat(resp.modelKey)}
-                            className="w-full rounded-xl py-3 text-sm font-bold transition-all duration-300 cursor-pointer border-2"
-                            style={{
-                              borderColor: color,
-                              color: "#fff",
-                              background: `linear-gradient(135deg, ${color}CC, ${color}AA)`,
-                              boxShadow: `0 4px 16px ${color}30`,
-                            }}
-                          >
-                            이 AI와 대화하기 →
-                          </button>
+                          {(chatHistories[resp.modelKey]?.length ?? 0) > 2 ? (
+                            <button
+                              onClick={() => selectModelForChat(resp.modelKey)}
+                              className="w-full rounded-xl py-3 text-sm font-bold transition-all duration-300 cursor-pointer border"
+                              style={{
+                                borderColor: color + "60",
+                                color: color,
+                                background: getModel(resp.modelKey)?.glow ?? "transparent",
+                              }}
+                            >
+                              대화 이어가기 →
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => selectModelForChat(resp.modelKey)}
+                              className="w-full rounded-xl py-3 text-sm font-bold transition-all duration-300 cursor-pointer border-2"
+                              style={{
+                                borderColor: color,
+                                color: "#fff",
+                                background: `linear-gradient(135deg, ${color}CC, ${color}AA)`,
+                                boxShadow: `0 4px 16px ${color}30`,
+                              }}
+                            >
+                              이 AI와 대화하기 →
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -585,7 +632,7 @@ export default function DebateArena() {
                 rows={1}
                 className="flex-1 bg-[var(--bg-card)] border border-[var(--border-dim)] rounded-xl px-4 py-3 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-blue-500/50 resize-none"
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                     e.preventDefault();
                     sendChat();
                   }
