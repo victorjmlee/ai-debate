@@ -194,6 +194,40 @@ body::after {
   margin: 1em 0;
 }
 
+.prose-debate table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.85em;
+}
+
+.prose-debate thead {
+  border-bottom: 2px solid var(--border-subtle);
+}
+
+.prose-debate th {
+  color: var(--text-primary);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.5em 0.75em;
+  white-space: nowrap;
+}
+
+.prose-debate td {
+  color: var(--text-secondary);
+  padding: 0.45em 0.75em;
+  border-bottom: 1px solid var(--border-dim);
+  line-height: 1.5;
+}
+
+.prose-debate tr:last-child td {
+  border-bottom: none;
+}
+
+.prose-debate tbody tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
 /* ─── Chat Bubbles ──────────────────────────────────────────────────────────── */
 
 .chat-bubble {
