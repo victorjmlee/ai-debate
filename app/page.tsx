@@ -196,6 +196,23 @@ export default function DebateArena() {
     setDeepLoading(true);
     setDeepStep("review");
 
+    // 추가 대화 내역이 있으면 초기 답변에 합쳐서 전달
+    const enrichedResponses: Record<string, ModelResponse> = {};
+    for (const [key, resp] of Object.entries(round1)) {
+      const extra = (chatHistories[key] ?? []).slice(2);
+      if (extra.length > 0) {
+        const chatSummary = extra
+          .map((msg) => msg.role === "user" ? `[추가 질문] ${msg.content}` : `[추가 답변] ${msg.content}`)
+          .join("\n\n");
+        enrichedResponses[key] = {
+          ...resp,
+          answer: `${resp.answer}\n\n--- 추가 대화 ---\n\n${chatSummary}`,
+        };
+      } else {
+        enrichedResponses[key] = resp;
+      }
+    }
+
     try {
       // Round 2: Cross Review
       const res2 = await fetch("/api/debate", {
@@ -205,7 +222,7 @@ export default function DebateArena() {
           question,
           models: selectedModels,
           round: 2,
-          previousResponses: round1,
+          previousResponses: enrichedResponses,
         }),
       });
       const data2 = await res2.json();
