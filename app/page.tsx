@@ -591,14 +591,23 @@ export default function DebateArena() {
                 })}
               </div>
 
-              {/* Deep Analysis Link */}
-              <div className="mt-8 text-center">
+              {/* Deep Analysis Button */}
+              <div className="mt-6">
                 <button
                   onClick={startDeepAnalysis}
-                  className="text-sm font-mono text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors cursor-pointer underline underline-offset-4 decoration-[var(--border-subtle)]"
+                  className="w-full rounded-xl py-4 text-sm font-bold transition-all duration-300 cursor-pointer border-2"
+                  style={{
+                    borderColor: "#D4AF37",
+                    color: "#fff",
+                    background: "linear-gradient(135deg, #D4AF37CC, #D4AF37AA)",
+                    boxShadow: "0 4px 16px rgba(212,175,55,0.3)",
+                  }}
                 >
                   Deep Analysis — 모델 간 교차 리뷰 & 종합 →
                 </button>
+                <p className="text-center text-[10px] text-[var(--text-muted)] mt-2 font-mono">
+                  각 AI가 서로의 답변을 검토하고, 최종 종합 분석을 생성합니다
+                </p>
               </div>
             </>
           ) : null}
