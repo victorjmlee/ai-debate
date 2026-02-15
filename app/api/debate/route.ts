@@ -42,6 +42,31 @@ function getGeminiClient() {
 
 // ─── Model Callers ───────────────────────────────────────────────────────────
 
+async function askClaudeSonnet(prompt: string): Promise<ModelResponse> {
+  const client = getAnthropicClient();
+  if (!client)
+    return { modelKey: "claude-sonnet", modelName: "Claude Sonnet 4.5", answer: "", error: "API 키 없음" };
+
+  try {
+    const response = await client.messages.create({
+      model: "claude-sonnet-4-5-20250514",
+      max_tokens: 4000,
+      messages: [{ role: "user", content: prompt }],
+    });
+    const text =
+      response.content[0].type === "text" ? response.content[0].text : "";
+    return {
+      modelKey: "claude-sonnet",
+      modelName: "Claude Sonnet 4.5",
+      answer: text,
+      tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
+    };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { modelKey: "claude-sonnet", modelName: "Claude Sonnet 4.5", answer: "", error: msg };
+  }
+}
+
 async function askClaudeHaiku(prompt: string): Promise<ModelResponse> {
   const client = getAnthropicClient();
   if (!client)
@@ -230,10 +255,10 @@ ${allReviews}
 
 규칙: 이모지 사용 금지. 테이블 사용 금지. 코드블록 사용 금지. 원본 답변을 그대로 복사하지 말고, 핵심만 추출하여 간결하게 재구성.`;
 
-      // Use Claude Haiku for synthesis, fallback to GPT-5 Mini
+      // Use Claude Sonnet for synthesis (highest quality), fallback chain: Haiku → GPT-5 Mini
       let result: ModelResponse;
       if (process.env.ANTHROPIC_API_KEY) {
-        result = await askClaudeHaiku(synthesisPrompt);
+        result = await askClaudeSonnet(synthesisPrompt);
       } else {
         result = await askGPT5Mini(synthesisPrompt);
       }
