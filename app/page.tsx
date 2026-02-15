@@ -121,8 +121,15 @@ export default function DebateArena() {
   };
 
   const startChatWith = (modelKey: string) => {
+    // Toggle: clicking the same model closes chat
+    if (activeChatModel === modelKey) {
+      setActiveChatModel(null);
+      setChatMode(false);
+      return;
+    }
     setChatMode(true);
     setActiveChatModel(modelKey);
+    setChatInput("");
     // Initialize history for this model if not exists, seeding with the Round 1 answer
     setChatHistories((prev) => {
       if (prev[modelKey]) return prev;
@@ -216,9 +223,6 @@ export default function DebateArena() {
 
   const getModelColor = (key: string) =>
     MODELS.find((m) => m.key === key)?.color ?? "#888";
-
-  const getModelName = (key: string) =>
-    MODELS.find((m) => m.key === key)?.name ?? key;
 
   // Step indicator mapping: step 1=Initial, 2=Chat, 3=Cross Review, 4=Synthesis
   const getActiveStep = () => {
@@ -429,33 +433,20 @@ export default function DebateArena() {
                 showChatButton={!!round1 && currentRound === 1 && !loading}
                 onStartChat={startChatWith}
                 activeChatModel={activeChatModel}
+                chatHistories={chatHistories}
+                chatInput={chatInput}
+                chatLoading={chatLoading}
+                onSendMessage={sendChatMessage}
+                onChatInputChange={setChatInput}
               />
             )}
 
-            {/* Continue / Chat buttons area (only when round 1 is done, not in later rounds) */}
-            {round1 && currentRound === 1 && !loading && !chatMode && (
+            {/* Continue to Cross Review (always visible after round 1) */}
+            {round1 && currentRound === 1 && !loading && (
               <ActionButton
                 onClick={continueToReview}
                 label="Continue to Cross Review"
                 sublabel="Each model reviews the others' answers"
-              />
-            )}
-
-            {/* Chat Panel */}
-            {chatMode && currentRound === 1 && activeChatModel && (
-              <ChatPanel
-                activeChatModel={activeChatModel}
-                chatHistories={chatHistories}
-                chatInput={chatInput}
-                setChatInput={setChatInput}
-                chatLoading={chatLoading}
-                sendChatMessage={sendChatMessage}
-                onSwitchModel={startChatWith}
-                onStartDebate={continueToReview}
-                selectedModels={selectedModels}
-                getModelColor={getModelColor}
-                getModelName={getModelName}
-                loading={loading}
               />
             )}
 
@@ -566,6 +557,11 @@ function RoundSection({
   showChatButton,
   onStartChat,
   activeChatModel,
+  chatHistories,
+  chatInput,
+  chatLoading,
+  onSendMessage,
+  onChatInputChange,
 }: {
   title: string;
   responses: Record<string, ModelResponse> | null;
@@ -574,6 +570,11 @@ function RoundSection({
   showChatButton?: boolean;
   onStartChat?: (modelKey: string) => void;
   activeChatModel?: string | null;
+  chatHistories?: Record<string, ChatMessage[]>;
+  chatInput?: string;
+  chatLoading?: boolean;
+  onSendMessage?: () => void;
+  onChatInputChange?: (v: string) => void;
 }) {
   return (
     <div className="mt-8">
@@ -601,6 +602,11 @@ function RoundSection({
               showChatButton={showChatButton}
               onStartChat={onStartChat}
               isActiveChat={activeChatModel === resp.modelKey}
+              chatHistory={chatHistories?.[resp.modelKey]}
+              chatInput={activeChatModel === resp.modelKey ? chatInput : undefined}
+              chatLoading={activeChatModel === resp.modelKey ? chatLoading : false}
+              onSendMessage={onSendMessage}
+              onChatInputChange={onChatInputChange}
             />
           ))}
         </div>
@@ -616,6 +622,11 @@ function ResponseCard({
   showChatButton,
   onStartChat,
   isActiveChat,
+  chatHistory,
+  chatInput,
+  chatLoading,
+  onSendMessage,
+  onChatInputChange,
 }: {
   response: ModelResponse;
   color: string;
@@ -623,12 +634,27 @@ function ResponseCard({
   showChatButton?: boolean;
   onStartChat?: (modelKey: string) => void;
   isActiveChat?: boolean;
+  chatHistory?: ChatMessage[];
+  chatInput?: string;
+  chatLoading?: boolean;
+  onSendMessage?: () => void;
+  onChatInputChange?: (v: string) => void;
 }) {
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Skip the initial Q&A pair (already shown in the card content)
+  const chatMessages = (chatHistory ?? []).slice(2);
+
+  useEffect(() => {
+    if (isActiveChat) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [chatMessages.length, isActiveChat]);
+
   return (
     <div
       className="animate-fade-up rounded-xl border overflow-hidden transition-all hover:border-opacity-60"
       style={{
-        borderColor: color + "30",
+        borderColor: isActiveChat ? color + "60" : color + "30",
         background: "var(--bg-card)",
         animationDelay: `${delay}s`,
         borderLeft: `3px solid ${color}`,
@@ -673,208 +699,99 @@ function ResponseCard({
               background: isActiveChat ? color + "20" : "transparent",
             }}
           >
-            {isActiveChat ? "Chatting..." : "Chat with this AI"}
+            {isActiveChat ? "Close Chat" : "Chat with this AI"}
           </button>
         )}
       </div>
-    </div>
-  );
-}
 
-function ChatPanel({
-  activeChatModel,
-  chatHistories,
-  chatInput,
-  setChatInput,
-  chatLoading,
-  sendChatMessage,
-  onSwitchModel,
-  onStartDebate,
-  selectedModels,
-  getModelColor,
-  getModelName,
-  loading,
-}: {
-  activeChatModel: string;
-  chatHistories: Record<string, ChatMessage[]>;
-  chatInput: string;
-  setChatInput: (v: string) => void;
-  chatLoading: boolean;
-  sendChatMessage: () => void;
-  onSwitchModel: (modelKey: string) => void;
-  onStartDebate: () => void;
-  selectedModels: string[];
-  getModelColor: (key: string) => string;
-  getModelName: (key: string) => string;
-  loading: boolean;
-}) {
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const activeColor = getModelColor(activeChatModel);
-  const messages = chatHistories[activeChatModel] ?? [];
-
-  // Skip the initial Q&A pair (already shown in Round 1)
-  const chatMessages = messages.slice(2);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatMessages.length]);
-
-  return (
-    <div className="mt-8 animate-fade-up">
-      <h3 className="text-sm font-mono text-[var(--text-secondary)] tracking-wider uppercase mb-4 flex items-center gap-2">
-        <span
-          className="inline-block w-1.5 h-1.5 rounded-full"
-          style={{ background: activeColor }}
-        />
-        Chat
-      </h3>
-
-      <div
-        className="rounded-xl border overflow-hidden"
-        style={{
-          borderColor: activeColor + "30",
-          background: "var(--bg-card)",
-        }}
-      >
-        {/* Model Tabs */}
-        <div className="flex border-b" style={{ borderColor: "var(--border-dim)" }}>
-          {selectedModels.map((modelKey) => {
-            const isActive = modelKey === activeChatModel;
-            const color = getModelColor(modelKey);
-            const hasHistory = (chatHistories[modelKey]?.length ?? 0) > 2;
-            return (
-              <button
-                key={modelKey}
-                onClick={() => onSwitchModel(modelKey)}
-                className="flex-1 px-4 py-3 text-xs font-mono font-semibold transition-all duration-200 cursor-pointer relative"
-                style={{
-                  color: isActive ? color : "var(--text-muted)",
-                  background: isActive ? color + "08" : "transparent",
-                  borderBottom: isActive ? `2px solid ${color}` : "2px solid transparent",
-                }}
-              >
-                <span className="flex items-center justify-center gap-2">
-                  <span
-                    className="w-1.5 h-1.5 rounded-full"
-                    style={{ background: isActive ? color : "var(--border-subtle)" }}
-                  />
-                  {getModelName(modelKey)}
-                  {hasHistory && (
-                    <span
-                      className="w-1.5 h-1.5 rounded-full"
-                      style={{ background: color + "80" }}
-                      title="Has chat history"
-                    />
-                  )}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Messages */}
-        <div className="chat-scroll-area px-5 py-4 max-h-[400px] overflow-y-auto">
-          {chatMessages.length === 0 ? (
-            <p className="text-sm text-[var(--text-muted)] text-center py-8 font-mono">
-              Ask a follow-up question to {getModelName(activeChatModel)}
-            </p>
-          ) : (
-            <div className="space-y-4">
-              {chatMessages.map((msg, i) => (
-                <div
-                  key={i}
-                  className={`chat-bubble ${msg.role === "user" ? "chat-bubble-user" : "chat-bubble-ai"}`}
-                  style={
-                    msg.role === "assistant"
-                      ? { borderColor: activeColor + "30" }
-                      : undefined
-                  }
-                >
-                  {msg.role === "assistant" ? (
-                    <div className="prose-debate text-sm">
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
-                    </div>
-                  ) : (
-                    <p className="text-sm">{msg.content}</p>
-                  )}
-                </div>
-              ))}
-              {chatLoading && (
-                <div
-                  className="chat-bubble chat-bubble-ai animate-pulse"
-                  style={{ borderColor: activeColor + "30" }}
-                >
-                  <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
-                    <span
-                      className="inline-block w-1.5 h-1.5 rounded-full animate-bounce"
-                      style={{ background: activeColor }}
-                    />
-                    <span
-                      className="inline-block w-1.5 h-1.5 rounded-full animate-bounce"
-                      style={{ background: activeColor, animationDelay: "0.1s" }}
-                    />
-                    <span
-                      className="inline-block w-1.5 h-1.5 rounded-full animate-bounce"
-                      style={{ background: activeColor, animationDelay: "0.2s" }}
-                    />
+      {/* Inline Chat Area */}
+      {isActiveChat && onSendMessage && onChatInputChange && (
+        <div
+          className="border-t"
+          style={{ borderColor: color + "20" }}
+        >
+          {/* Chat Messages */}
+          <div className="chat-scroll-area px-5 py-4 max-h-[300px] overflow-y-auto">
+            {chatMessages.length === 0 ? (
+              <p className="text-xs text-[var(--text-muted)] text-center py-4 font-mono">
+                Ask a follow-up question...
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {chatMessages.map((msg, i) => (
+                  <div
+                    key={i}
+                    className={`chat-bubble ${msg.role === "user" ? "chat-bubble-user" : "chat-bubble-ai"}`}
+                    style={
+                      msg.role === "assistant"
+                        ? { borderColor: color + "30" }
+                        : undefined
+                    }
+                  >
+                    {msg.role === "assistant" ? (
+                      <div className="prose-debate text-sm">
+                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p className="text-sm">{msg.content}</p>
+                    )}
                   </div>
-                </div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </div>
+                ))}
+                {chatLoading && (
+                  <div
+                    className="chat-bubble chat-bubble-ai animate-pulse"
+                    style={{ borderColor: color + "30" }}
+                  >
+                    <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
+                      <span
+                        className="inline-block w-1.5 h-1.5 rounded-full animate-bounce"
+                        style={{ background: color }}
+                      />
+                      <span
+                        className="inline-block w-1.5 h-1.5 rounded-full animate-bounce"
+                        style={{ background: color, animationDelay: "0.1s" }}
+                      />
+                      <span
+                        className="inline-block w-1.5 h-1.5 rounded-full animate-bounce"
+                        style={{ background: color, animationDelay: "0.2s" }}
+                      />
+                    </div>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+            )}
+          </div>
 
-        {/* Input Area */}
-        <div
-          className="border-t px-4 py-3 flex gap-3 items-end"
-          style={{ borderColor: "var(--border-dim)" }}
-        >
-          <textarea
-            value={chatInput}
-            onChange={(e) => setChatInput(e.target.value)}
-            placeholder={`Ask ${getModelName(activeChatModel)} a follow-up...`}
-            rows={1}
-            className="flex-1 bg-[var(--bg-elevated)] border border-[var(--border-dim)] rounded-lg px-4 py-2.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-blue-500/50 resize-none"
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                sendChatMessage();
-              }
-            }}
-          />
-          <button
-            onClick={sendChatMessage}
-            disabled={!chatInput.trim() || chatLoading}
-            className="shrink-0 rounded-lg px-4 py-2.5 text-sm font-semibold transition-all duration-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-            style={{
-              background: activeColor,
-              color: "#fff",
-            }}
+          {/* Input */}
+          <div
+            className="border-t px-4 py-3 flex gap-2 items-end"
+            style={{ borderColor: color + "15" }}
           >
-            Send
-          </button>
+            <textarea
+              value={chatInput ?? ""}
+              onChange={(e) => onChatInputChange(e.target.value)}
+              placeholder="Follow-up question..."
+              rows={1}
+              className="flex-1 bg-[var(--bg-elevated)] border border-[var(--border-dim)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-blue-500/50 resize-none"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  onSendMessage();
+                }
+              }}
+            />
+            <button
+              onClick={onSendMessage}
+              disabled={!(chatInput ?? "").trim() || chatLoading}
+              className="shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition-all duration-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+              style={{ background: color, color: "#fff" }}
+            >
+              Send
+            </button>
+          </div>
         </div>
-
-        {/* Bottom Action */}
-        <div
-          className="border-t px-4 py-3 flex justify-end"
-          style={{ borderColor: "var(--border-dim)" }}
-        >
-          <button
-            onClick={onStartDebate}
-            disabled={loading}
-            className="rounded-lg border px-5 py-2 text-xs font-mono font-semibold transition-all duration-200 cursor-pointer disabled:opacity-50"
-            style={{
-              borderColor: "var(--border-subtle)",
-              color: "var(--text-secondary)",
-              background: "var(--bg-elevated)",
-            }}
-          >
-            Start Cross Review →
-          </button>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
