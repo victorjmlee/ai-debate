@@ -537,7 +537,7 @@ export default function DebateArena() {
                                   placeholder="후속 질문..."
                                   rows={1}
                                   className="flex-1 bg-[var(--bg-elevated)] border border-[var(--border-dim)] rounded-lg px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-opacity-50 resize-none"
-                                  style={{ focusBorderColor: color, minHeight: "40px", maxHeight: "80px" }}
+                                  style={{ minHeight: "40px", maxHeight: "80px" }}
                                   onKeyDown={(e) => {
                                     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                                       e.preventDefault();
