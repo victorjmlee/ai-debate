@@ -27,10 +27,6 @@ const ANTHROPIC_TOOLS_BASIC: Anthropic.Messages.ToolUnion[] = [
   { type: "web_search_20250305", name: "web_search", max_uses: 3 },
 ];
 
-const ANTHROPIC_TOOLS_ADVANCED: Anthropic.Messages.ToolUnion[] = [
-  { type: "web_search_20260209", name: "web_search", max_uses: 3 },
-];
-
 const GEMINI_SEARCH_CONFIG = {
   tools: [{ googleSearch: {} }],
 };
@@ -134,7 +130,7 @@ async function chatAnthropicSynthesis(
     const response = await anthropicClient.messages.create({
       model: SYNTHESIS_MODEL.apiModel,
       max_tokens: 4000,
-      tools: ANTHROPIC_TOOLS_ADVANCED,
+      tools: ANTHROPIC_TOOLS_BASIC,
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
     });
     return {
