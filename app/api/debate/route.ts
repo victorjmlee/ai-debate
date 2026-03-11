@@ -20,7 +20,11 @@ interface DebateRequest {
 
 // ─── Web-search-enabled tool configs ────────────────────────────────────────
 
-const ANTHROPIC_TOOLS: Anthropic.Messages.ToolUnion[] = [
+const ANTHROPIC_TOOLS_BASIC: Anthropic.Messages.ToolUnion[] = [
+  { type: "web_search_20250305", name: "web_search", max_uses: 3 },
+];
+
+const ANTHROPIC_TOOLS_ADVANCED: Anthropic.Messages.ToolUnion[] = [
   { type: "web_search_20260209", name: "web_search", max_uses: 3 },
 ];
 
@@ -42,7 +46,7 @@ async function askAnthropic(
     const response = await anthropicClient.messages.create({
       model: getApiModel(modelKey),
       max_tokens: 4000,
-      tools: ANTHROPIC_TOOLS,
+      tools: ANTHROPIC_TOOLS_BASIC,
       messages: [{ role: "user", content: prompt }],
     });
     return {
@@ -70,7 +74,6 @@ async function askOpenAI(
       model: getApiModel(modelKey),
       messages: [{ role: "user", content: prompt }],
       max_completion_tokens: 4000,
-      web_search_options: {},
     });
     return {
       modelKey,
@@ -142,7 +145,7 @@ async function askSynthesisModel(prompt: string): Promise<ModelResponse> {
     const response = await anthropicClient.messages.create({
       model: SYNTHESIS_MODEL.apiModel,
       max_tokens: 4000,
-      tools: ANTHROPIC_TOOLS,
+      tools: ANTHROPIC_TOOLS_ADVANCED,
       messages: [{ role: "user", content: prompt }],
     });
     return {

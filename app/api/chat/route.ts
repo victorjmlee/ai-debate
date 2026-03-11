@@ -23,7 +23,11 @@ interface ChatRequest {
 
 // ─── Web-search-enabled tool configs ────────────────────────────────────────
 
-const ANTHROPIC_TOOLS: Anthropic.Messages.ToolUnion[] = [
+const ANTHROPIC_TOOLS_BASIC: Anthropic.Messages.ToolUnion[] = [
+  { type: "web_search_20250305", name: "web_search", max_uses: 3 },
+];
+
+const ANTHROPIC_TOOLS_ADVANCED: Anthropic.Messages.ToolUnion[] = [
   { type: "web_search_20260209", name: "web_search", max_uses: 3 },
 ];
 
@@ -45,7 +49,7 @@ async function chatAnthropic(
     const response = await anthropicClient.messages.create({
       model: getApiModel(modelKey),
       max_tokens: 4000,
-      tools: ANTHROPIC_TOOLS,
+      tools: ANTHROPIC_TOOLS_BASIC,
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
     });
     return {
@@ -73,7 +77,6 @@ async function chatOpenAI(
       model: getApiModel(modelKey),
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
       max_completion_tokens: 4000,
-      web_search_options: {},
     });
     return {
       modelKey,
@@ -130,7 +133,7 @@ async function chatAnthropicSynthesis(
     const response = await anthropicClient.messages.create({
       model: SYNTHESIS_MODEL.apiModel,
       max_tokens: 4000,
-      tools: ANTHROPIC_TOOLS,
+      tools: ANTHROPIC_TOOLS_ADVANCED,
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
     });
     return {
