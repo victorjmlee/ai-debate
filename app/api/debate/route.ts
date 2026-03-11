@@ -74,6 +74,7 @@ async function askOpenAI(
       model: getApiModel(modelKey),
       messages: [{ role: "user", content: prompt }],
       max_completion_tokens: 4000,
+      web_search_options: {},
     });
     return {
       modelKey,

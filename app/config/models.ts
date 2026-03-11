@@ -4,7 +4,7 @@
 //
 // .env.local:
 //   MODEL_CLAUDE_HAIKU=claude-haiku-4-5-20251001   # pin specific snapshot
-//   MODEL_GPT=gpt-5-mini-2025-08-07
+//   MODEL_GPT=gpt-4o-mini-search-preview
 //   MODEL_GEMINI=gemini-2.5-flash
 //   MODEL_SYNTHESIS=claude-sonnet-4-6
 
@@ -28,8 +28,8 @@ export const COMPARE_MODELS: ModelConfig[] = [
   },
   {
     key: "gpt-5-mini",
-    apiModel: process.env.MODEL_GPT ?? "gpt-5-mini",
-    displayName: "GPT-5 Mini",
+    apiModel: process.env.MODEL_GPT ?? "gpt-4o-mini-search-preview",
+    displayName: "GPT-4o Mini Search",
     provider: "OpenAI",
     color: "#10B981",
     glow: "rgba(16,185,129,0.15)",

@@ -77,6 +77,7 @@ async function chatOpenAI(
       model: getApiModel(modelKey),
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
       max_completion_tokens: 4000,
+      web_search_options: {},
     });
     return {
       modelKey,
