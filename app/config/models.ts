@@ -6,7 +6,7 @@
 //   MODEL_CLAUDE_HAIKU=claude-haiku-4-5-20251001   # pin specific snapshot
 //   MODEL_GPT=gpt-5-mini-2025-08-07
 //   MODEL_GEMINI=gemini-2.5-flash
-//   MODEL_SYNTHESIS=claude-sonnet-4-5-20250929
+//   MODEL_SYNTHESIS=claude-sonnet-4-6
 
 export interface ModelConfig {
   key: string;
@@ -46,8 +46,8 @@ export const COMPARE_MODELS: ModelConfig[] = [
 
 export const SYNTHESIS_MODEL = {
   key: "synthesis",
-  apiModel: process.env.MODEL_SYNTHESIS ?? "claude-sonnet-4-5",
-  displayName: "Claude Sonnet 4.5",
+  apiModel: process.env.MODEL_SYNTHESIS ?? "claude-sonnet-4-6",
+  displayName: "Claude Sonnet 4.6",
   provider: "Anthropic",
 };
 

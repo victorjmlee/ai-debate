@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import OpenAI from "openai";
-import { GoogleGenAI } from "@google/genai";
 import { getApiModel, getDisplayName, SYNTHESIS_MODEL } from "@/app/config/models";
+import {
+  anthropicClient,
+  openaiClient,
+  geminiClient,
+  extractAnthropicText,
+  type ModelResponse,
+} from "@/app/lib/ai-clients";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -16,53 +21,37 @@ interface ChatRequest {
   messages: ChatMessage[];
 }
 
-interface ModelResponse {
-  modelKey: string;
-  modelName: string;
-  answer: string;
-  error?: string;
-  tokensUsed?: number;
-}
+// ─── Web-search-enabled tool configs ────────────────────────────────────────
 
-// ─── AI Clients (lazy init) ──────────────────────────────────────────────────
+const ANTHROPIC_TOOLS: Anthropic.Messages.ToolUnion[] = [
+  { type: "web_search_20260209", name: "web_search", max_uses: 3 },
+];
 
-function getAnthropicClient() {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return null;
-  return new Anthropic({ apiKey: key });
-}
-
-function getOpenAIClient() {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) return null;
-  return new OpenAI({ apiKey: key });
-}
-
-function getGeminiClient() {
-  const key = process.env.GOOGLE_API_KEY;
-  if (!key) return null;
-  return new GoogleGenAI({ apiKey: key });
-}
+const GEMINI_SEARCH_CONFIG = {
+  tools: [{ googleSearch: {} }],
+};
 
 // ─── Model Callers ───────────────────────────────────────────────────────────
 
-async function chatAnthropic(modelKey: string, messages: ChatMessage[]): Promise<ModelResponse> {
-  const client = getAnthropicClient();
+async function chatAnthropic(
+  modelKey: string,
+  messages: ChatMessage[]
+): Promise<ModelResponse> {
   const name = getDisplayName(modelKey);
-  if (!client)
+  if (!anthropicClient)
     return { modelKey, modelName: name, answer: "", error: "API 키 없음" };
 
   try {
-    const response = await client.messages.create({
+    const response = await anthropicClient.messages.create({
       model: getApiModel(modelKey),
       max_tokens: 4000,
+      tools: ANTHROPIC_TOOLS,
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
     });
-    const text = response.content[0].type === "text" ? response.content[0].text : "";
     return {
       modelKey,
       modelName: name,
-      answer: text,
+      answer: extractAnthropicText(response.content),
       tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
     };
   } catch (e: unknown) {
@@ -71,17 +60,20 @@ async function chatAnthropic(modelKey: string, messages: ChatMessage[]): Promise
   }
 }
 
-async function chatOpenAI(modelKey: string, messages: ChatMessage[]): Promise<ModelResponse> {
-  const client = getOpenAIClient();
+async function chatOpenAI(
+  modelKey: string,
+  messages: ChatMessage[]
+): Promise<ModelResponse> {
   const name = getDisplayName(modelKey);
-  if (!client)
+  if (!openaiClient)
     return { modelKey, modelName: name, answer: "", error: "API 키 없음" };
 
   try {
-    const response = await client.chat.completions.create({
+    const response = await openaiClient.chat.completions.create({
       model: getApiModel(modelKey),
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
       max_completion_tokens: 4000,
+      web_search_options: {},
     });
     return {
       modelKey,
@@ -95,30 +87,30 @@ async function chatOpenAI(modelKey: string, messages: ChatMessage[]): Promise<Mo
   }
 }
 
-async function chatGemini(modelKey: string, messages: ChatMessage[]): Promise<ModelResponse> {
-  const client = getGeminiClient();
+async function chatGemini(
+  modelKey: string,
+  messages: ChatMessage[]
+): Promise<ModelResponse> {
   const name = getDisplayName(modelKey);
-  if (!client)
+  if (!geminiClient)
     return { modelKey, modelName: name, answer: "", error: "API 키 없음" };
 
   try {
-    const formatted = messages
-      .map((m) => (m.role === "user" ? `User: ${m.content}` : `Assistant: ${m.content}`))
-      .join("\n\n");
-    const lastUserMsg = messages[messages.length - 1];
-    const prompt =
-      messages.length > 1
-        ? `이전 대화:\n${formatted}\n\n위 대화의 맥락을 이어서 마지막 질문에 답변해주세요.`
-        : lastUserMsg.content;
+    const contents = messages.map((m) => ({
+      role: m.role === "assistant" ? ("model" as const) : ("user" as const),
+      parts: [{ text: m.content }],
+    }));
 
-    const response = await client.models.generateContent({
+    const response = await geminiClient.models.generateContent({
       model: getApiModel(modelKey),
-      contents: prompt,
+      contents,
+      config: GEMINI_SEARCH_CONFIG,
     });
     return {
       modelKey,
       modelName: name,
       answer: response.text ?? "",
+      tokensUsed: response.usageMetadata?.totalTokenCount,
     };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -126,24 +118,25 @@ async function chatGemini(modelKey: string, messages: ChatMessage[]): Promise<Mo
   }
 }
 
-async function chatAnthropicSynthesis(messages: ChatMessage[]): Promise<ModelResponse> {
-  const client = getAnthropicClient();
+async function chatAnthropicSynthesis(
+  messages: ChatMessage[]
+): Promise<ModelResponse> {
   const modelKey = SYNTHESIS_MODEL.key;
   const name = SYNTHESIS_MODEL.displayName;
-  if (!client)
+  if (!anthropicClient)
     return { modelKey, modelName: name, answer: "", error: "API 키 없음" };
 
   try {
-    const response = await client.messages.create({
+    const response = await anthropicClient.messages.create({
       model: SYNTHESIS_MODEL.apiModel,
       max_tokens: 4000,
+      tools: ANTHROPIC_TOOLS,
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
     });
-    const text = response.content[0].type === "text" ? response.content[0].text : "";
     return {
       modelKey,
       modelName: name,
-      answer: text,
+      answer: extractAnthropicText(response.content),
       tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
     };
   } catch (e: unknown) {
@@ -160,7 +153,10 @@ export async function POST(request: NextRequest) {
     const { model, messages } = body;
 
     if (!messages?.length) {
-      return NextResponse.json({ error: "메시지를 입력해주세요." }, { status: 400 });
+      return NextResponse.json(
+        { error: "메시지를 입력해주세요." },
+        { status: 400 }
+      );
     }
 
     let response: ModelResponse;
@@ -176,11 +172,13 @@ export async function POST(request: NextRequest) {
         response = await chatGemini(model, messages);
         break;
       case "synthesis":
-        // Synthesis uses Claude Sonnet — call Anthropic with synthesis model ID
         response = await chatAnthropicSynthesis(messages);
         break;
       default:
-        return NextResponse.json({ error: "알 수 없는 모델입니다." }, { status: 400 });
+        return NextResponse.json(
+          { error: "알 수 없는 모델입니다." },
+          { status: 400 }
+        );
     }
 
     return NextResponse.json({ response });

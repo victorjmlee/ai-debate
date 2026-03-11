@@ -1,17 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import OpenAI from "openai";
-import { GoogleGenAI } from "@google/genai";
+import { getApiModel, getDisplayName, SYNTHESIS_MODEL } from "@/app/config/models";
+import {
+  anthropicClient,
+  openaiClient,
+  geminiClient,
+  extractAnthropicText,
+  type ModelResponse,
+} from "@/app/lib/ai-clients";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-
-interface ModelResponse {
-  modelKey: string;
-  modelName: string;
-  answer: string;
-  error?: string;
-  tokensUsed?: number;
-}
 
 interface DebateRequest {
   question: string;
@@ -20,129 +18,95 @@ interface DebateRequest {
   previousResponses?: Record<string, ModelResponse>;
 }
 
-// ─── AI Clients (lazy init) ──────────────────────────────────────────────────
+// ─── Web-search-enabled tool configs ────────────────────────────────────────
 
-function getAnthropicClient() {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return null;
-  return new Anthropic({ apiKey: key });
-}
+const ANTHROPIC_TOOLS: Anthropic.Messages.ToolUnion[] = [
+  { type: "web_search_20260209", name: "web_search", max_uses: 3 },
+];
 
-function getOpenAIClient() {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) return null;
-  return new OpenAI({ apiKey: key });
-}
-
-function getGeminiClient() {
-  const key = process.env.GOOGLE_API_KEY;
-  if (!key) return null;
-  return new GoogleGenAI({ apiKey: key });
-}
+const GEMINI_SEARCH_CONFIG = {
+  tools: [{ googleSearch: {} }],
+};
 
 // ─── Model Callers ───────────────────────────────────────────────────────────
 
-async function askClaudeSonnet(prompt: string): Promise<ModelResponse> {
-  const client = getAnthropicClient();
-  if (!client)
-    return { modelKey: "claude-sonnet", modelName: "Claude Sonnet 4.5", answer: "", error: "API 키 없음" };
+async function askAnthropic(
+  modelKey: string,
+  prompt: string
+): Promise<ModelResponse> {
+  const name = getDisplayName(modelKey);
+  if (!anthropicClient)
+    return { modelKey, modelName: name, answer: "", error: "API 키 없음" };
 
   try {
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-5-20250929",
+    const response = await anthropicClient.messages.create({
+      model: getApiModel(modelKey),
       max_tokens: 4000,
+      tools: ANTHROPIC_TOOLS,
       messages: [{ role: "user", content: prompt }],
     });
-    const text =
-      response.content[0].type === "text" ? response.content[0].text : "";
     return {
-      modelKey: "claude-sonnet",
-      modelName: "Claude Sonnet 4.5",
-      answer: text,
+      modelKey,
+      modelName: name,
+      answer: extractAnthropicText(response.content),
       tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
     };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { modelKey: "claude-sonnet", modelName: "Claude Sonnet 4.5", answer: "", error: msg };
+    return { modelKey, modelName: name, answer: "", error: msg };
   }
 }
 
-async function askClaudeHaiku(prompt: string): Promise<ModelResponse> {
-  const client = getAnthropicClient();
-  if (!client)
-    return { modelKey: "claude-haiku", modelName: "Claude Haiku", answer: "", error: "API 키 없음" };
+async function askOpenAI(
+  modelKey: string,
+  prompt: string
+): Promise<ModelResponse> {
+  const name = getDisplayName(modelKey);
+  if (!openaiClient)
+    return { modelKey, modelName: name, answer: "", error: "API 키 없음" };
 
   try {
-    const response = await client.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 4000,
-      messages: [{ role: "user", content: prompt }],
-    });
-    const text =
-      response.content[0].type === "text" ? response.content[0].text : "";
-    return {
-      modelKey: "claude-haiku",
-      modelName: "Claude Haiku",
-      answer: text,
-      tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
-    };
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return { modelKey: "claude-haiku", modelName: "Claude Haiku", answer: "", error: msg };
-  }
-}
-
-async function askGPT5Mini(prompt: string): Promise<ModelResponse> {
-  const client = getOpenAIClient();
-  if (!client)
-    return { modelKey: "gpt-5-mini", modelName: "GPT-5 Mini", answer: "", error: "API 키 없음" };
-
-  try {
-    const response = await client.chat.completions.create({
-      model: "gpt-5-mini",
+    const response = await openaiClient.chat.completions.create({
+      model: getApiModel(modelKey),
       messages: [{ role: "user", content: prompt }],
       max_completion_tokens: 4000,
+      web_search_options: {},
     });
     return {
-      modelKey: "gpt-5-mini",
-      modelName: "GPT-5 Mini",
+      modelKey,
+      modelName: name,
       answer: response.choices[0]?.message?.content ?? "",
       tokensUsed: response.usage?.total_tokens,
     };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { modelKey: "gpt-5-mini", modelName: "GPT-5 Mini", answer: "", error: msg };
+    return { modelKey, modelName: name, answer: "", error: msg };
   }
 }
 
-async function askGemini(prompt: string): Promise<ModelResponse> {
-  const client = getGeminiClient();
-  if (!client)
-    return {
-      modelKey: "gemini",
-      modelName: "Gemini 2.5 Flash",
-      answer: "",
-      error: "API 키 없음",
-    };
+async function askGemini(
+  modelKey: string,
+  prompt: string
+): Promise<ModelResponse> {
+  const name = getDisplayName(modelKey);
+  if (!geminiClient)
+    return { modelKey, modelName: name, answer: "", error: "API 키 없음" };
 
   try {
-    const response = await client.models.generateContent({
-      model: "gemini-2.5-flash",
+    const response = await geminiClient.models.generateContent({
+      model: getApiModel(modelKey),
       contents: prompt,
+      config: GEMINI_SEARCH_CONFIG,
     });
     return {
-      modelKey: "gemini",
-      modelName: "Gemini 2.5 Flash",
+      modelKey,
+      modelName: name,
       answer: response.text ?? "",
+      tokensUsed: response.usageMetadata?.totalTokenCount,
     };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    return {
-      modelKey: "gemini",
-      modelName: "Gemini 2.5 Flash",
-      answer: "",
-      error: msg,
-    };
+    return { modelKey, modelName: name, answer: "", error: msg };
   }
 }
 
@@ -154,11 +118,11 @@ async function askModel(
 ): Promise<ModelResponse> {
   switch (modelKey) {
     case "claude-haiku":
-      return askClaudeHaiku(prompt);
+      return askAnthropic(modelKey, prompt);
     case "gpt-5-mini":
-      return askGPT5Mini(prompt);
+      return askOpenAI(modelKey, prompt);
     case "gemini":
-      return askGemini(prompt);
+      return askGemini(modelKey, prompt);
     default:
       return {
         modelKey,
@@ -166,6 +130,35 @@ async function askModel(
         answer: "",
         error: "알 수 없는 모델",
       };
+  }
+}
+
+async function askSynthesisModel(prompt: string): Promise<ModelResponse> {
+  if (!anthropicClient) {
+    return askOpenAI("gpt-5-mini", prompt);
+  }
+
+  try {
+    const response = await anthropicClient.messages.create({
+      model: SYNTHESIS_MODEL.apiModel,
+      max_tokens: 4000,
+      tools: ANTHROPIC_TOOLS,
+      messages: [{ role: "user", content: prompt }],
+    });
+    return {
+      modelKey: SYNTHESIS_MODEL.key,
+      modelName: SYNTHESIS_MODEL.displayName,
+      answer: extractAnthropicText(response.content),
+      tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
+    };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return {
+      modelKey: SYNTHESIS_MODEL.key,
+      modelName: SYNTHESIS_MODEL.displayName,
+      answer: "",
+      error: msg,
+    };
   }
 }
 
@@ -185,13 +178,9 @@ export async function POST(request: NextRequest) {
 
     // Round 1: Initial answers
     if (round === 1) {
-      const results = await Promise.all(
-        models.map((m) => askModel(m, question))
-      );
+      const results = await Promise.all(models.map((m) => askModel(m, question)));
       const responses: Record<string, ModelResponse> = {};
-      for (const r of results) {
-        responses[r.modelKey] = r;
-      }
+      for (const r of results) responses[r.modelKey] = r;
       return NextResponse.json({ responses });
     }
 
@@ -223,9 +212,7 @@ ${allAnswers}
         models.map((m) => askModel(m, reviewPrompt))
       );
       const responses: Record<string, ModelResponse> = {};
-      for (const r of results) {
-        responses[r.modelKey] = r;
-      }
+      for (const r of results) responses[r.modelKey] = r;
       return NextResponse.json({ responses });
     }
 
@@ -255,18 +242,14 @@ ${allReviews}
 
 규칙: 이모지 사용 금지. 테이블 사용 금지. 코드블록 사용 금지. 원본 답변을 그대로 복사하지 말고, 핵심만 추출하여 간결하게 재구성.`;
 
-      // Use Claude Sonnet for synthesis (highest quality), fallback chain: Haiku → GPT-5 Mini
-      let result: ModelResponse;
-      if (process.env.ANTHROPIC_API_KEY) {
-        result = await askClaudeSonnet(synthesisPrompt);
-      } else {
-        result = await askGPT5Mini(synthesisPrompt);
-      }
-
+      const result = await askSynthesisModel(synthesisPrompt);
       return NextResponse.json({ synthesis: result });
     }
 
-    return NextResponse.json({ error: "잘못된 요청입니다." }, { status: 400 });
+    return NextResponse.json(
+      { error: "잘못된 요청입니다." },
+      { status: 400 }
+    );
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: msg }, { status: 500 });
