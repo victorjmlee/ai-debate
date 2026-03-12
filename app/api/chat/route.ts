@@ -8,6 +8,7 @@ import {
   extractAnthropicText,
   type ModelResponse,
 } from "@/app/lib/ai-clients";
+import { getTranslations, type Locale } from "@/app/i18n/translations";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -19,6 +20,7 @@ interface ChatMessage {
 interface ChatRequest {
   model: string;
   messages: ChatMessage[];
+  locale?: Locale;
 }
 
 // ─── Web-search-enabled tool configs ────────────────────────────────────────
@@ -39,7 +41,7 @@ async function chatAnthropic(
 ): Promise<ModelResponse> {
   const name = getDisplayName(modelKey);
   if (!anthropicClient)
-    return { modelKey, modelName: name, answer: "", error: "API 키 없음" };
+    return { modelKey, modelName: name, answer: "", error: "API key missing" };
 
   try {
     const response = await anthropicClient.messages.create({
@@ -66,7 +68,7 @@ async function chatOpenAI(
 ): Promise<ModelResponse> {
   const name = getDisplayName(modelKey);
   if (!openaiClient)
-    return { modelKey, modelName: name, answer: "", error: "API 키 없음" };
+    return { modelKey, modelName: name, answer: "", error: "API key missing" };
 
   try {
     const response = await openaiClient.chat.completions.create({
@@ -93,7 +95,7 @@ async function chatGemini(
 ): Promise<ModelResponse> {
   const name = getDisplayName(modelKey);
   if (!geminiClient)
-    return { modelKey, modelName: name, answer: "", error: "API 키 없음" };
+    return { modelKey, modelName: name, answer: "", error: "API key missing" };
 
   try {
     const contents = messages.map((m) => ({
@@ -124,7 +126,7 @@ async function chatAnthropicSynthesis(
   const modelKey = SYNTHESIS_MODEL.key;
   const name = SYNTHESIS_MODEL.displayName;
   if (!anthropicClient)
-    return { modelKey, modelName: name, answer: "", error: "API 키 없음" };
+    return { modelKey, modelName: name, answer: "", error: "API key missing" };
 
   try {
     const response = await anthropicClient.messages.create({
@@ -150,11 +152,12 @@ async function chatAnthropicSynthesis(
 export async function POST(request: NextRequest) {
   try {
     const body: ChatRequest = await request.json();
-    const { model, messages } = body;
+    const { model, messages, locale } = body;
+    const t = getTranslations(locale ?? "en");
 
     if (!messages?.length) {
       return NextResponse.json(
-        { error: "메시지를 입력해주세요." },
+        { error: t.pleaseEnterMessage },
         { status: 400 }
       );
     }
@@ -176,7 +179,7 @@ export async function POST(request: NextRequest) {
         break;
       default:
         return NextResponse.json(
-          { error: "알 수 없는 모델입니다." },
+          { error: t.unknownModelError },
           { status: 400 }
         );
     }

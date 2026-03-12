@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
+import { detectLocale, getTranslations, type Locale, type Translations } from "./i18n/translations";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -50,6 +51,15 @@ type ViewMode = "input" | "compare" | "deep-analysis";
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function DebateArena() {
+  const [locale, setLocale] = useState<Locale>("en");
+  const t = useMemo(() => getTranslations(locale), [locale]);
+
+  useEffect(() => {
+    const detected = detectLocale();
+    setLocale(detected);
+    document.documentElement.lang = detected;
+  }, []);
+
   const [viewMode, setViewMode] = useState<ViewMode>("input");
   const [question, setQuestion] = useState("");
   const [availableModels, setAvailableModels] = useState<Record<string, boolean> | null>(null);
@@ -174,13 +184,13 @@ export default function DebateArena() {
       const res = await fetch("/api/debate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, models: selectedModels, round: 1 }),
+        body: JSON.stringify({ question, models: selectedModels, round: 1, locale }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "요청 실패");
+      if (!res.ok) throw new Error(data.error || t.requestFailed);
       if (data.responses) setRound1(data.responses);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "알 수 없는 에러";
+      const msg = e instanceof Error ? e.message : t.unknownError;
       alert(msg);
       setViewMode("input");
     } finally {
@@ -231,17 +241,17 @@ export default function DebateArena() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: modelKey, messages: updatedHistory }),
+        body: JSON.stringify({ model: modelKey, messages: updatedHistory, locale }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "요청 실패");
+      if (!res.ok) throw new Error(data.error || t.requestFailed);
 
       setChatHistories((prev) => ({
         ...prev,
         [modelKey]: [...(prev[modelKey] ?? []), { role: "assistant", content: data.response?.answer ?? "" }],
       }));
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "알 수 없는 에러";
+      const msg = e instanceof Error ? e.message : t.unknownError;
       setChatHistories((prev) => ({
         ...prev,
         [modelKey]: [...(prev[modelKey] ?? []), { role: "assistant", content: `[Error: ${msg}]` }],
@@ -257,7 +267,7 @@ export default function DebateArena() {
     if (synthesisChatHistory.length > 0) return; // already initialized
     if (!synthesis) return;
     setSynthesisChatHistory([
-      { role: "user", content: `다음은 여러 AI의 답변을 종합 분석한 결과입니다:\n\n${synthesis.answer}` },
+      { role: "user", content: t.synthesisIntro(synthesis.answer) },
       { role: "assistant", content: synthesis.answer },
     ]);
     setTimeout(() => synthesisChatInputRef.current?.focus(), 200);
@@ -277,17 +287,17 @@ export default function DebateArena() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "synthesis", messages: updatedHistory }),
+        body: JSON.stringify({ model: "synthesis", messages: updatedHistory, locale }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "요청 실패");
+      if (!res.ok) throw new Error(data.error || t.requestFailed);
 
       setSynthesisChatHistory((prev) => [
         ...prev,
         { role: "assistant", content: data.response?.answer ?? "" },
       ]);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "알 수 없는 에러";
+      const msg = e instanceof Error ? e.message : t.unknownError;
       setSynthesisChatHistory((prev) => [
         ...prev,
         { role: "assistant", content: `[Error: ${msg}]` },
@@ -305,17 +315,17 @@ export default function DebateArena() {
     setDeepLoading(true);
     setDeepStep("review");
 
-    // 추가 대화 내역이 있으면 초기 답변에 합쳐서 전달
+    // Include follow-up chat history with initial answers if available
     const enrichedResponses: Record<string, ModelResponse> = {};
     for (const [key, resp] of Object.entries(round1)) {
       const extra = (chatHistories[key] ?? []).slice(2);
       if (extra.length > 0) {
         const chatSummary = extra
-          .map((msg) => msg.role === "user" ? `[추가 질문] ${msg.content}` : `[추가 답변] ${msg.content}`)
+          .map((msg) => msg.role === "user" ? t.followUpQ(msg.content) : t.followUpA(msg.content))
           .join("\n\n");
         enrichedResponses[key] = {
           ...resp,
-          answer: `${resp.answer}\n\n--- 추가 대화 ---\n\n${chatSummary}`,
+          answer: `${resp.answer}\n\n${t.followUpConversation}\n\n${chatSummary}`,
         };
       } else {
         enrichedResponses[key] = resp;
@@ -331,11 +341,12 @@ export default function DebateArena() {
           question,
           models: selectedModels,
           round: 2,
+          locale,
           previousResponses: enrichedResponses,
         }),
       });
       const data2 = await res2.json();
-      if (!res2.ok) throw new Error(data2.error || "요청 실패");
+      if (!res2.ok) throw new Error(data2.error || "Request failed");
       if (data2.responses) setRound2(data2.responses);
 
       // Round 3: Synthesis
@@ -347,15 +358,16 @@ export default function DebateArena() {
           question,
           models: selectedModels,
           round: 3,
+          locale,
           previousResponses: data2.responses,
         }),
       });
       const data3 = await res3.json();
-      if (!res3.ok) throw new Error(data3.error || "요청 실패");
+      if (!res3.ok) throw new Error(data3.error || "Request failed");
       if (data3.synthesis) setSynthesis(data3.synthesis);
       setDeepStep("done");
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "알 수 없는 에러";
+      const msg = e instanceof Error ? e.message : t.unknownError;
       alert(msg);
     } finally {
       setDeepLoading(false);
@@ -433,7 +445,7 @@ export default function DebateArena() {
         style={{ width: sidebarOpen ? "280px" : "0px" }}
       >
         <div className="flex items-center justify-between px-4 py-4 border-b border-[var(--border-dim)] shrink-0">
-          <span className="text-xs font-mono text-[var(--text-muted)] tracking-wider uppercase">이전 대화</span>
+          <span className="text-xs font-mono text-[var(--text-muted)] tracking-wider uppercase">{t.history}</span>
           <button
             onClick={() => setSidebarOpen(false)}
             className="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-sm cursor-pointer transition-colors"
@@ -446,18 +458,18 @@ export default function DebateArena() {
             onClick={() => { startNew(); setSidebarOpen(false); }}
             className="w-full rounded-lg border border-[var(--border-dim)] hover:border-[var(--border-subtle)] px-3 py-2.5 text-sm font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-all cursor-pointer text-left"
           >
-            + 새 대화
+            {t.newChat}
           </button>
         </div>
         <div className="flex-1 overflow-y-auto px-3 pb-4 chat-scroll-area">
           {sessions.length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)] text-center mt-8 font-mono">아직 대화 기록이 없습니다</p>
+            <p className="text-xs text-[var(--text-muted)] text-center mt-8 font-mono">{t.noHistory}</p>
           ) : (
             <div className="space-y-1.5">
               {sessions.map((session) => {
                 const isActive = session.id === activeSessionId;
                 const hasDeep = session.deepStep === "done";
-                const timeAgo = getTimeAgo(session.timestamp);
+                const timeAgo = getTimeAgo(session.timestamp, t);
                 return (
                   <div
                     key={session.id}
@@ -528,7 +540,7 @@ export default function DebateArena() {
               <button
                 onClick={() => setSidebarOpen(!sidebarOpen)}
                 className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer text-lg"
-                title="이전 대화"
+                title={t.history}
               >
                 ☰
               </button>
@@ -561,10 +573,10 @@ export default function DebateArena() {
         <main className="flex-1 max-w-3xl mx-auto w-full px-6 py-12 animate-fade-up">
           <div className="text-center mb-10">
             <h2 className="text-3xl font-bold text-[var(--text-primary)] mb-3">
-              어떤 AI가 가장 잘 답할까?
+              {t.heroTitle}
             </h2>
             <p className="text-[var(--text-secondary)] text-lg">
-              3개 AI를 동시에 비교하고, 마음에 드는 AI와 대화를 이어가세요
+              {t.heroSubtitle}
             </p>
           </div>
 
@@ -573,7 +585,7 @@ export default function DebateArena() {
             <textarea
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
-              placeholder="AI에게 물어볼 질문을 입력하세요..."
+              placeholder={t.inputPlaceholder}
               rows={4}
               className="w-full bg-[var(--bg-card)] border border-[var(--border-dim)] rounded-xl px-5 py-4 text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 transition-all resize-none text-lg"
               onKeyDown={(e) => {
@@ -625,7 +637,7 @@ export default function DebateArena() {
                     </div>
                     {!isAvailable && (
                       <span className="text-[10px] font-mono text-[var(--text-muted)] mt-1 block">
-                        No API key
+                        {t.noApiKey}
                       </span>
                     )}
                   </button>
@@ -634,7 +646,7 @@ export default function DebateArena() {
             </div>
             {availableModels && Object.values(availableModels).every((v) => !v) && (
               <p className="text-sm text-red-400 mt-3 font-mono">
-                No API keys configured. Add them in Vercel → Settings → Environment Variables.
+                {t.noApiKeys}
               </p>
             )}
           </div>
@@ -649,7 +661,7 @@ export default function DebateArena() {
             }}
           >
             <span className="relative z-10 text-white drop-shadow-sm">
-              Compare AI Responses →
+              {t.compareButton}
             </span>
           </button>
           <p className="text-center text-xs text-[var(--text-muted)] mt-3 font-mono">
@@ -665,7 +677,7 @@ export default function DebateArena() {
           {/* Question Display */}
           <div className="mb-6 bg-[var(--bg-card)] border border-[var(--border-dim)] rounded-xl px-6 py-4">
             <span className="text-xs font-mono text-[var(--text-muted)] tracking-wider uppercase">
-              Question
+              {t.question}
             </span>
             <p className="text-lg text-[var(--text-primary)] mt-1">{question}</p>
           </div>
@@ -742,7 +754,7 @@ export default function DebateArena() {
                             {extraMessages.length > 0 && (
                               <div className="mt-4 pt-4 border-t space-y-2.5" style={{ borderColor: color + "20" }}>
                                 <span className="text-[10px] font-mono tracking-wider uppercase" style={{ color: color + "80" }}>
-                                  후속 대화
+                                  {t.followUpChat}
                                 </span>
                                 {extraMessages.map((msg, j) => (
                                   <div
@@ -790,7 +802,7 @@ export default function DebateArena() {
                                   ref={(el) => { chatInputRefs.current[resp.modelKey] = el; }}
                                   value={getChatInput(resp.modelKey)}
                                   onChange={(e) => setChatInput(resp.modelKey, e.target.value)}
-                                  placeholder="후속 질문..."
+                                  placeholder={t.followUpPlaceholder}
                                   rows={1}
                                   className="flex-1 bg-[var(--bg-elevated)] border border-[var(--border-dim)] rounded-lg px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-opacity-50 resize-none"
                                   style={{ minHeight: "40px", maxHeight: "80px" }}
@@ -807,14 +819,14 @@ export default function DebateArena() {
                                   className="shrink-0 rounded-lg px-3 py-2.5 text-xs font-bold transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
                                   style={{ background: color, color: "#fff" }}
                                 >
-                                  Send
+                                  {t.send}
                                 </button>
                               </div>
                               <button
                                 onClick={closeChat}
                                 className="mt-2 text-[10px] font-mono text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors cursor-pointer w-full text-center"
                               >
-                                닫기
+                                {t.close}
                               </button>
                             </div>
                           ) : (
@@ -837,7 +849,7 @@ export default function DebateArena() {
                                     }
                               }
                             >
-                              {hasHistory ? "대화 이어가기 →" : "이 AI와 대화하기 →"}
+                              {hasHistory ? t.continueChat : t.chatWithAI}
                             </button>
                           )}
                         </div>
@@ -859,10 +871,10 @@ export default function DebateArena() {
                     boxShadow: "0 4px 16px rgba(212,175,55,0.3)",
                   }}
                 >
-                  Deep Analysis — 모델 간 교차 리뷰 & 종합 →
+                  {t.deepAnalysisButton}
                 </button>
                 <p className="text-center text-[10px] text-[var(--text-muted)] mt-2 font-mono">
-                  각 AI가 서로의 답변을 검토하고, 최종 종합 분석을 생성합니다
+                  {t.deepAnalysisDesc}
                 </p>
               </div>
             </>
@@ -878,25 +890,25 @@ export default function DebateArena() {
             onClick={() => setViewMode("compare")}
             className="text-sm font-mono text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer mb-6"
           >
-            ← 비교로 돌아가기
+            {t.backToComparison}
           </button>
 
           <h2 className="text-xl font-bold text-[var(--text-primary)] mb-2">Deep Analysis</h2>
           <p className="text-sm text-[var(--text-secondary)] mb-8">
-            각 AI가 다른 AI의 답변을 리뷰하고, 모든 인사이트를 종합합니다
+            {t.deepAnalysisSubtitle}
           </p>
 
           {/* Question Recap */}
           <div className="mb-6 bg-[var(--bg-card)] border border-[var(--border-dim)] rounded-xl px-6 py-4">
-            <span className="text-xs font-mono text-[var(--text-muted)] tracking-wider uppercase">Question</span>
+            <span className="text-xs font-mono text-[var(--text-muted)] tracking-wider uppercase">{t.question}</span>
             <p className="text-lg text-[var(--text-primary)] mt-1">{question}</p>
           </div>
 
           {/* Progress */}
           <div className="flex items-center gap-3 mb-8">
-            <StepBadge num={1} label="Cross Review" active={deepStep === "review"} done={deepStep === "synthesis" || deepStep === "done"} />
+            <StepBadge num={1} label={t.stepCrossReview} active={deepStep === "review"} done={deepStep === "synthesis" || deepStep === "done"} />
             <div className="h-px flex-1" style={{ background: deepStep !== "idle" && deepStep !== "review" ? "linear-gradient(90deg, #3B82F6, #10B981)" : "var(--border-dim)" }} />
-            <StepBadge num={2} label="Synthesis" active={deepStep === "synthesis"} done={deepStep === "done"} golden />
+            <StepBadge num={2} label={t.stepSynthesis} active={deepStep === "synthesis"} done={deepStep === "done"} golden />
           </div>
 
           {/* Cross Review Results */}
@@ -912,7 +924,7 @@ export default function DebateArena() {
             <div className="mb-8">
               <h3 className="text-sm font-mono text-[var(--text-secondary)] tracking-wider uppercase mb-4 flex items-center gap-2">
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--text-secondary)]" />
-                Cross Review
+                {t.crossReview}
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {Object.values(round2).map((resp, i) => {
@@ -959,7 +971,7 @@ export default function DebateArena() {
             <div className="mt-4">
               <h3 className="text-sm font-mono text-[#D4AF37] tracking-wider uppercase mb-4 flex items-center gap-2">
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#D4AF37]" />
-                Final Synthesis
+                {t.finalSynthesis}
               </h3>
               <div
                 className="animate-fade-up rounded-xl border px-6 py-5"
@@ -990,7 +1002,7 @@ export default function DebateArena() {
                     {synthesisChatHistory.length > 2 && (
                       <div className="mt-5 pt-5 border-t space-y-3" style={{ borderColor: "#D4AF3730" }}>
                         <span className="text-[10px] font-mono tracking-wider uppercase text-[#D4AF3780]">
-                          후속 대화
+                          {t.followUpChat}
                         </span>
                         {synthesisChatHistory.slice(2).map((msg, j) => (
                           <div
@@ -1036,7 +1048,7 @@ export default function DebateArena() {
                           boxShadow: "0 4px 16px rgba(212,175,55,0.3)",
                         }}
                       >
-                        Sonnet과 대화하기 →
+                        {t.chatWithSonnet}
                       </button>
                     )}
                     {synthesisChatHistory.length > 0 && (
@@ -1045,7 +1057,7 @@ export default function DebateArena() {
                           ref={synthesisChatInputRef}
                           value={synthesisChatInput}
                           onChange={(e) => setSynthesisChatInput(e.target.value)}
-                          placeholder="종합 분석에 대해 추가 질문..."
+                          placeholder={t.synthesisPlaceholder}
                           rows={1}
                           className="flex-1 bg-[var(--bg-elevated)] border rounded-lg px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none resize-none"
                           style={{ borderColor: "#D4AF3730", minHeight: "40px", maxHeight: "80px" }}
@@ -1062,7 +1074,7 @@ export default function DebateArena() {
                           className="shrink-0 rounded-lg px-3 py-2.5 text-xs font-bold transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
                           style={{ background: "#D4AF37", color: "#fff" }}
                         >
-                          Send
+                          {t.send}
                         </button>
                       </div>
                     )}
@@ -1092,14 +1104,14 @@ export default function DebateArena() {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function getTimeAgo(timestamp: number): string {
+function getTimeAgo(timestamp: number, t: Translations): string {
   const diff = Date.now() - timestamp;
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "방금";
-  if (mins < 60) return `${mins}분 전`;
+  if (mins < 1) return t.justNow;
+  if (mins < 60) return t.mAgo(mins);
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}시간 전`;
-  return `${Math.floor(hours / 24)}일 전`;
+  if (hours < 24) return t.hAgo(hours);
+  return t.dAgo(Math.floor(hours / 24));
 }
 
 // ─── Sub-Components ──────────────────────────────────────────────────────────
