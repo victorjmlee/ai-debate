@@ -1450,7 +1450,7 @@ function ApiKeyInput({
         autoComplete="off"
         spellCheck={false}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-3 text-sm text-[var(--text-primary)] placeholder-[#444460] transition-colors focus:border-blue-500/70 focus:outline-none"
+        className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-card)] px-4 py-3 text-sm text-[var(--text-primary)] placeholder-[#585878] transition-colors focus:border-blue-500/70 focus:outline-none"
       />
     </label>
   );
