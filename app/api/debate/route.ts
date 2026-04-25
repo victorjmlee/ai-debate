@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { getApiModel, getDisplayName, SYNTHESIS_MODEL } from "@/app/config/models";
 import {
-  anthropicClient,
-  openaiClient,
-  geminiClient,
+  createApiClients,
   extractAnthropicText,
+  type ApiClients,
+  type ApiKeys,
   type ModelResponse,
 } from "@/app/lib/ai-clients";
 import { getTranslations, type Locale } from "@/app/i18n/translations";
@@ -17,6 +17,7 @@ interface DebateRequest {
   models: string[];
   round: 1 | 2 | 3;
   locale?: Locale;
+  apiKeys?: ApiKeys;
   previousResponses?: Record<string, ModelResponse>;
 }
 
@@ -34,14 +35,15 @@ const GEMINI_SEARCH_CONFIG = {
 
 async function askAnthropic(
   modelKey: string,
-  prompt: string
+  prompt: string,
+  clients: ApiClients
 ): Promise<ModelResponse> {
   const name = getDisplayName(modelKey);
-  if (!anthropicClient)
+  if (!clients.anthropicClient)
     return { modelKey, modelName: name, answer: "", error: "API key missing" };
 
   try {
-    const response = await anthropicClient.messages.create({
+    const response = await clients.anthropicClient.messages.create({
       model: getApiModel(modelKey),
       max_tokens: 4000,
       tools: ANTHROPIC_TOOLS_BASIC,
@@ -61,14 +63,15 @@ async function askAnthropic(
 
 async function askOpenAI(
   modelKey: string,
-  prompt: string
+  prompt: string,
+  clients: ApiClients
 ): Promise<ModelResponse> {
   const name = getDisplayName(modelKey);
-  if (!openaiClient)
+  if (!clients.openaiClient)
     return { modelKey, modelName: name, answer: "", error: "API key missing" };
 
   try {
-    const response = await openaiClient.chat.completions.create({
+    const response = await clients.openaiClient.chat.completions.create({
       model: getApiModel(modelKey),
       messages: [{ role: "user", content: prompt }],
       max_completion_tokens: 4000,
@@ -88,14 +91,15 @@ async function askOpenAI(
 
 async function askGemini(
   modelKey: string,
-  prompt: string
+  prompt: string,
+  clients: ApiClients
 ): Promise<ModelResponse> {
   const name = getDisplayName(modelKey);
-  if (!geminiClient)
+  if (!clients.geminiClient)
     return { modelKey, modelName: name, answer: "", error: "API key missing" };
 
   try {
-    const response = await geminiClient.models.generateContent({
+    const response = await clients.geminiClient.models.generateContent({
       model: getApiModel(modelKey),
       contents: prompt,
       config: GEMINI_SEARCH_CONFIG,
@@ -116,15 +120,16 @@ async function askGemini(
 
 async function askModel(
   modelKey: string,
-  prompt: string
+  prompt: string,
+  clients: ApiClients
 ): Promise<ModelResponse> {
   switch (modelKey) {
     case "claude-haiku":
-      return askAnthropic(modelKey, prompt);
+      return askAnthropic(modelKey, prompt, clients);
     case "gpt-5-mini":
-      return askOpenAI(modelKey, prompt);
+      return askOpenAI(modelKey, prompt, clients);
     case "gemini":
-      return askGemini(modelKey, prompt);
+      return askGemini(modelKey, prompt, clients);
     default:
       return {
         modelKey,
@@ -135,13 +140,13 @@ async function askModel(
   }
 }
 
-async function askSynthesisModel(prompt: string): Promise<ModelResponse> {
-  if (!anthropicClient) {
-    return askOpenAI("gpt-5-mini", prompt);
+async function askSynthesisModel(prompt: string, clients: ApiClients): Promise<ModelResponse> {
+  if (!clients.anthropicClient) {
+    return askOpenAI("gpt-5-mini", prompt, clients);
   }
 
   try {
-    const response = await anthropicClient.messages.create({
+    const response = await clients.anthropicClient.messages.create({
       model: SYNTHESIS_MODEL.apiModel,
       max_tokens: 4000,
       tools: ANTHROPIC_TOOLS_BASIC,
@@ -169,8 +174,9 @@ async function askSynthesisModel(prompt: string): Promise<ModelResponse> {
 export async function POST(request: NextRequest) {
   try {
     const body: DebateRequest = await request.json();
-    const { question, models, round, previousResponses, locale } = body;
+    const { question, models, round, previousResponses, locale, apiKeys } = body;
     const t = getTranslations(locale ?? "en");
+    const clients = createApiClients(apiKeys);
 
     if (!question?.trim()) {
       return NextResponse.json(
@@ -181,7 +187,7 @@ export async function POST(request: NextRequest) {
 
     // Round 1: Initial answers
     if (round === 1) {
-      const results = await Promise.all(models.map((m) => askModel(m, question)));
+      const results = await Promise.all(models.map((m) => askModel(m, question, clients)));
       const responses: Record<string, ModelResponse> = {};
       for (const r of results) responses[r.modelKey] = r;
       return NextResponse.json({ responses });
@@ -197,7 +203,7 @@ export async function POST(request: NextRequest) {
       const reviewPrompt = t.reviewPrompt(allAnswers);
 
       const results = await Promise.all(
-        models.map((m) => askModel(m, reviewPrompt))
+        models.map((m) => askModel(m, reviewPrompt, clients))
       );
       const responses: Record<string, ModelResponse> = {};
       for (const r of results) responses[r.modelKey] = r;
@@ -213,7 +219,7 @@ export async function POST(request: NextRequest) {
 
       const synthesisPrompt = t.synthesisPrompt(question, allReviews);
 
-      const result = await askSynthesisModel(synthesisPrompt);
+      const result = await askSynthesisModel(synthesisPrompt, clients);
       return NextResponse.json({ synthesis: result });
     }
 

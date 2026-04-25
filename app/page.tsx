@@ -3,7 +3,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import { detectLocale, getTranslations, type Locale, type Translations } from "./i18n/translations";
-import AuthButton from "./components/auth-button";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -28,6 +27,12 @@ interface ModelOption {
   glow: string;
 }
 
+interface ApiKeys {
+  anthropic: string;
+  openai: string;
+  google: string;
+}
+
 interface Session {
   id: number;
   question: string;
@@ -49,6 +54,17 @@ const MODELS: ModelOption[] = [
 
 type ViewMode = "input" | "compare" | "deep-analysis";
 
+const API_KEYS_STORAGE_KEY = "ai-debate-api-keys";
+const EMPTY_API_KEYS: ApiKeys = { anthropic: "", openai: "", google: "" };
+
+function toRequestApiKeys(apiKeys: ApiKeys) {
+  return {
+    anthropic: apiKeys.anthropic.trim(),
+    openai: apiKeys.openai.trim(),
+    google: apiKeys.google.trim(),
+  };
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function DebateArena() {
@@ -66,6 +82,10 @@ export default function DebateArena() {
   const [availableModels, setAvailableModels] = useState<Record<string, boolean> | null>(null);
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [apiKeys, setApiKeys] = useState<ApiKeys>(EMPTY_API_KEYS);
+  const [apiKeyDraft, setApiKeyDraft] = useState<ApiKeys>(EMPTY_API_KEYS);
+  const [apiKeysLoaded, setApiKeysLoaded] = useState(false);
+  const [apiKeyPanelOpen, setApiKeyPanelOpen] = useState(false);
 
   // Session history (persisted to localStorage)
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -112,6 +132,24 @@ export default function DebateArena() {
     sessionsLoaded.current = true;
   }, []);
 
+  // Load provider API keys from this browser.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(API_KEYS_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as Partial<ApiKeys>;
+        const keys = {
+          anthropic: parsed.anthropic ?? "",
+          openai: parsed.openai ?? "",
+          google: parsed.google ?? "",
+        };
+        setApiKeys(keys);
+        setApiKeyDraft(keys);
+      }
+    } catch { /* ignore */ }
+    setApiKeysLoaded(true);
+  }, []);
+
   // Persist sessions to localStorage when they change
   useEffect(() => {
     if (!sessionsLoaded.current) return; // skip initial empty state
@@ -120,19 +158,29 @@ export default function DebateArena() {
     } catch { /* ignore — quota exceeded etc. */ }
   }, [sessions]);
 
-  // Fetch available models
+  // Fetch available models from server env keys plus browser-saved personal keys.
   useEffect(() => {
-    fetch("/api/models")
+    if (!apiKeysLoaded) return;
+
+    fetch("/api/models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKeys: toRequestApiKeys(apiKeys) }),
+    })
       .then((res) => res.json())
       .then((data) => {
-        setAvailableModels(data.available);
+        const available = data.available as Record<string, boolean>;
+        setAvailableModels(available);
         const keys = Object.entries(data.available as Record<string, boolean>)
           .filter(([, v]) => v)
           .map(([k]) => k);
-        setSelectedModels(keys);
+        setSelectedModels((prev) => {
+          const kept = prev.filter((key) => available[key]);
+          return kept.length > 0 ? kept : keys;
+        });
       })
       .catch(() => setAvailableModels({}));
-  }, []);
+  }, [apiKeys, apiKeysLoaded]);
 
   // Auto-scroll chat when messages change
   useEffect(() => {
@@ -162,6 +210,27 @@ export default function DebateArena() {
 
   const getModel = (key: string) => MODELS.find((m) => m.key === key);
 
+  const savedKeyCount = Object.values(apiKeys).filter((key) => key.trim()).length;
+  const openApiKeyPanel = useCallback(() => {
+    setApiKeyDraft(apiKeys);
+    setApiKeyPanelOpen(true);
+  }, [apiKeys]);
+
+  const saveApiKeys = () => {
+    const keys = toRequestApiKeys(apiKeyDraft);
+    setApiKeys(keys);
+    setApiKeyDraft(keys);
+    localStorage.setItem(API_KEYS_STORAGE_KEY, JSON.stringify(keys));
+    setApiKeyPanelOpen(false);
+  };
+
+  const clearApiKeys = () => {
+    setApiKeys(EMPTY_API_KEYS);
+    setApiKeyDraft(EMPTY_API_KEYS);
+    localStorage.removeItem(API_KEYS_STORAGE_KEY);
+    setApiKeyPanelOpen(false);
+  };
+
   // ─── Compare Flow ──────────────────────────────────────────────────────────
 
   const startCompare = async () => {
@@ -185,7 +254,13 @@ export default function DebateArena() {
       const res = await fetch("/api/debate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, models: selectedModels, round: 1, locale }),
+        body: JSON.stringify({
+          question,
+          models: selectedModels,
+          round: 1,
+          locale,
+          apiKeys: toRequestApiKeys(apiKeys),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || t.requestFailed);
@@ -242,7 +317,12 @@ export default function DebateArena() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: modelKey, messages: updatedHistory, locale }),
+        body: JSON.stringify({
+          model: modelKey,
+          messages: updatedHistory,
+          locale,
+          apiKeys: toRequestApiKeys(apiKeys),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || t.requestFailed);
@@ -288,7 +368,12 @@ export default function DebateArena() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "synthesis", messages: updatedHistory, locale }),
+        body: JSON.stringify({
+          model: "synthesis",
+          messages: updatedHistory,
+          locale,
+          apiKeys: toRequestApiKeys(apiKeys),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || t.requestFailed);
@@ -343,6 +428,7 @@ export default function DebateArena() {
           models: selectedModels,
           round: 2,
           locale,
+          apiKeys: toRequestApiKeys(apiKeys),
           previousResponses: enrichedResponses,
         }),
       });
@@ -360,6 +446,7 @@ export default function DebateArena() {
           models: selectedModels,
           round: 3,
           locale,
+          apiKeys: toRequestApiKeys(apiKeys),
           previousResponses: data2.responses,
         }),
       });
@@ -565,10 +652,102 @@ export default function DebateArena() {
                   + New
                 </button>
               )}
-              <AuthButton />
+              <button
+                type="button"
+                aria-expanded={apiKeyPanelOpen}
+                aria-controls="api-key-panel"
+                onPointerDown={(e) => {
+                  if (e.button === 0) openApiKeyPanel();
+                }}
+                onClick={openApiKeyPanel}
+                className="text-sm font-mono border rounded-lg px-4 py-2 transition-all cursor-pointer"
+                style={{
+                  borderColor: savedKeyCount > 0 ? "var(--border-subtle)" : "#D4AF3744",
+                  color: savedKeyCount > 0 ? "var(--text-secondary)" : "#D4AF37",
+                  background: savedKeyCount > 0 ? "transparent" : "rgba(212,175,55,0.06)",
+                }}
+              >
+                API Keys{savedKeyCount > 0 ? ` · ${savedKeyCount}` : ""}
+              </button>
             </div>
           </div>
         </header>
+
+        {apiKeyPanelOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="api-key-panel-title"
+          >
+            <div
+              id="api-key-panel"
+              className="w-full max-w-lg rounded-xl border border-[var(--border-dim)] bg-[var(--bg-surface)] shadow-2xl"
+            >
+              <div className="flex items-center justify-between border-b border-[var(--border-dim)] px-5 py-4">
+                <div>
+                  <h2 id="api-key-panel-title" className="text-base font-bold text-[var(--text-primary)]">API Keys</h2>
+                  <p className="mt-1 text-xs text-[var(--text-muted)]">
+                    Stored only in this browser.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setApiKeyPanelOpen(false)}
+                  className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="space-y-4 px-5 py-5">
+                <ApiKeyInput
+                  label="Anthropic"
+                  value={apiKeyDraft.anthropic}
+                  placeholder="sk-ant-..."
+                  onChange={(value) => setApiKeyDraft((prev) => ({ ...prev, anthropic: value }))}
+                />
+                <ApiKeyInput
+                  label="OpenAI"
+                  value={apiKeyDraft.openai}
+                  placeholder="sk-..."
+                  onChange={(value) => setApiKeyDraft((prev) => ({ ...prev, openai: value }))}
+                />
+                <ApiKeyInput
+                  label="Google"
+                  value={apiKeyDraft.google}
+                  placeholder="AI..."
+                  onChange={(value) => setApiKeyDraft((prev) => ({ ...prev, google: value }))}
+                />
+              </div>
+              <div className="flex items-center justify-between border-t border-[var(--border-dim)] px-5 py-4">
+                <button
+                  type="button"
+                  onClick={clearApiKeys}
+                  className="text-xs font-mono text-[var(--text-muted)] hover:text-red-400 transition-colors cursor-pointer"
+                >
+                  Clear saved keys
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setApiKeyPanelOpen(false)}
+                    className="rounded-lg border border-[var(--border-subtle)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveApiKeys}
+                    className="rounded-lg px-4 py-2 text-sm font-bold text-white transition-opacity cursor-pointer"
+                    style={{ background: "linear-gradient(135deg, #3B82F6, #10B981)" }}
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
       {/* ═══════════════════ INPUT VIEW ═══════════════════ */}
       {viewMode === "input" && (
@@ -647,9 +826,21 @@ export default function DebateArena() {
               })}
             </div>
             {availableModels && Object.values(availableModels).every((v) => !v) && (
-              <p className="text-sm text-red-400 mt-3 font-mono">
-                {t.noApiKeys}
-              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <p className="text-sm text-red-400 font-mono">
+                  {t.noApiKeys}
+                </p>
+                <button
+                  type="button"
+                  onPointerDown={(e) => {
+                    if (e.button === 0) openApiKeyPanel();
+                  }}
+                  onClick={openApiKeyPanel}
+                  className="rounded-lg border border-[#D4AF3744] px-3 py-1.5 text-xs font-mono text-[#D4AF37] transition-colors hover:border-[#D4AF37]"
+                >
+                  API Keys
+                </button>
+              </div>
             )}
           </div>
 
@@ -1117,6 +1308,35 @@ function getTimeAgo(timestamp: number, t: Translations): string {
 }
 
 // ─── Sub-Components ──────────────────────────────────────────────────────────
+
+function ApiKeyInput({
+  label,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-2 block text-xs font-mono uppercase tracking-wider text-[var(--text-muted)]">
+        {label}
+      </span>
+      <input
+        type="password"
+        value={value}
+        placeholder={placeholder}
+        autoComplete="off"
+        spellCheck={false}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-lg border border-[var(--border-dim)] bg-[var(--bg-card)] px-4 py-3 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-colors focus:border-blue-500/50 focus:outline-none"
+      />
+    </label>
+  );
+}
 
 function StepBadge({ num, label, active, done, golden }: {
   num: number;

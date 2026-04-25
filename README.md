@@ -51,9 +51,11 @@ cd ai-debate
 npm install
 ```
 
-### Environment Variables
+### API Keys
 
-Create a `.env.local` file in the project root:
+Open the app and use **API Keys** in the header to save your provider keys in this browser. The keys are stored in `localStorage` and are sent only when you make model requests.
+
+You can also provide server-side fallback keys with a `.env.local` file:
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...

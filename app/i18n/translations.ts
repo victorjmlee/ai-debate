@@ -12,7 +12,7 @@ const translations = {
     heroSubtitle: "Compare 3 AIs side by side, then continue chatting with your favorite",
     inputPlaceholder: "Enter a question to ask the AIs...",
     compareButton: "Compare AI Responses →",
-    noApiKeys: "No API keys configured. Add them in Vercel → Settings → Environment Variables.",
+    noApiKeys: "No API keys configured. Add them from API Keys.",
     noApiKey: "No API key",
     models: "Models",
 
@@ -114,7 +114,7 @@ Rules: No emojis. No tables. No code blocks. Do not copy original answers verbat
     heroSubtitle: "3개 AI를 동시에 비교하고, 마음에 드는 AI와 대화를 이어가세요",
     inputPlaceholder: "AI에게 물어볼 질문을 입력하세요...",
     compareButton: "AI 답변 비교하기 →",
-    noApiKeys: "API 키가 설정되지 않았습니다. Vercel → Settings → Environment Variables에서 추가하세요.",
+    noApiKeys: "API 키가 설정되지 않았습니다. API Keys에서 추가하세요.",
     noApiKey: "API 키 없음",
     models: "Models",
 

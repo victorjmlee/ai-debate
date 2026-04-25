@@ -1,11 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { getAvailableModels, type ApiKeys } from "@/app/lib/ai-clients";
 
 export async function GET() {
-  const available: Record<string, boolean> = {
-    "claude-haiku": !!process.env.ANTHROPIC_API_KEY,
-    "gpt-5-mini": !!process.env.OPENAI_API_KEY,
-    gemini: !!process.env.GOOGLE_API_KEY,
-  };
+  return NextResponse.json({ available: getAvailableModels() });
+}
 
-  return NextResponse.json({ available });
+export async function POST(request: NextRequest) {
+  const body: { apiKeys?: ApiKeys } = await request.json().catch(() => ({}));
+  return NextResponse.json({ available: getAvailableModels(body.apiKeys) });
 }
