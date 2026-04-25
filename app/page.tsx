@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import { detectLocale, getTranslations, type Locale, type Translations } from "./i18n/translations";
+import AuthButton from "./components/auth-button";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -564,6 +565,7 @@ export default function DebateArena() {
                   + New
                 </button>
               )}
+              <AuthButton />
             </div>
           </div>
         </header>
