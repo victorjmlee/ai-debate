@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { getApiModel, getDisplayName, SYNTHESIS_MODEL } from "@/app/config/models";
+import { getApiModel, getDisplayName, modelSupportsWebSearch, SYNTHESIS_MODEL } from "@/app/config/models";
 import {
   createApiClients,
   extractAnthropicText,
@@ -18,6 +18,7 @@ interface DebateRequest {
   round: 1 | 2 | 3;
   locale?: Locale;
   apiKeys?: ApiKeys;
+  modelOverrides?: Record<string, string>;
   previousResponses?: Record<string, ModelResponse>;
 }
 
@@ -36,15 +37,16 @@ const GEMINI_SEARCH_CONFIG = {
 async function askAnthropic(
   modelKey: string,
   prompt: string,
-  clients: ApiClients
+  clients: ApiClients,
+  overrides?: Record<string, string>
 ): Promise<ModelResponse> {
-  const name = getDisplayName(modelKey);
+  const name = getDisplayName(modelKey, overrides);
   if (!clients.anthropicClient)
     return { modelKey, modelName: name, answer: "", error: "API key missing" };
 
   try {
     const response = await clients.anthropicClient.messages.create({
-      model: getApiModel(modelKey),
+      model: getApiModel(modelKey, overrides),
       max_tokens: 4000,
       tools: ANTHROPIC_TOOLS_BASIC,
       messages: [{ role: "user", content: prompt }],
@@ -64,18 +66,20 @@ async function askAnthropic(
 async function askOpenAI(
   modelKey: string,
   prompt: string,
-  clients: ApiClients
+  clients: ApiClients,
+  overrides?: Record<string, string>
 ): Promise<ModelResponse> {
-  const name = getDisplayName(modelKey);
+  const name = getDisplayName(modelKey, overrides);
   if (!clients.openaiClient)
     return { modelKey, modelName: name, answer: "", error: "API key missing" };
 
   try {
+    const supportsSearch = modelSupportsWebSearch(modelKey, overrides);
     const response = await clients.openaiClient.chat.completions.create({
-      model: getApiModel(modelKey),
+      model: getApiModel(modelKey, overrides),
       messages: [{ role: "user", content: prompt }],
       max_completion_tokens: 4000,
-      web_search_options: {},
+      ...(supportsSearch ? { web_search_options: {} } : {}),
     });
     return {
       modelKey,
@@ -92,15 +96,16 @@ async function askOpenAI(
 async function askGemini(
   modelKey: string,
   prompt: string,
-  clients: ApiClients
+  clients: ApiClients,
+  overrides?: Record<string, string>
 ): Promise<ModelResponse> {
-  const name = getDisplayName(modelKey);
+  const name = getDisplayName(modelKey, overrides);
   if (!clients.geminiClient)
     return { modelKey, modelName: name, answer: "", error: "API key missing" };
 
   try {
     const response = await clients.geminiClient.models.generateContent({
-      model: getApiModel(modelKey),
+      model: getApiModel(modelKey, overrides),
       contents: prompt,
       config: GEMINI_SEARCH_CONFIG,
     });
@@ -121,22 +126,18 @@ async function askGemini(
 async function askModel(
   modelKey: string,
   prompt: string,
-  clients: ApiClients
+  clients: ApiClients,
+  overrides?: Record<string, string>
 ): Promise<ModelResponse> {
   switch (modelKey) {
     case "claude-haiku":
-      return askAnthropic(modelKey, prompt, clients);
+      return askAnthropic(modelKey, prompt, clients, overrides);
     case "gpt-5-mini":
-      return askOpenAI(modelKey, prompt, clients);
+      return askOpenAI(modelKey, prompt, clients, overrides);
     case "gemini":
-      return askGemini(modelKey, prompt, clients);
+      return askGemini(modelKey, prompt, clients, overrides);
     default:
-      return {
-        modelKey,
-        modelName: modelKey,
-        answer: "",
-        error: "Unknown model",
-      };
+      return { modelKey, modelName: modelKey, answer: "", error: "Unknown model" };
   }
 }
 
@@ -174,7 +175,7 @@ async function askSynthesisModel(prompt: string, clients: ApiClients): Promise<M
 export async function POST(request: NextRequest) {
   try {
     const body: DebateRequest = await request.json();
-    const { question, models, round, previousResponses, locale, apiKeys } = body;
+    const { question, models, round, previousResponses, locale, apiKeys, modelOverrides } = body;
     const t = getTranslations(locale ?? "en");
     const clients = createApiClients(apiKeys);
 
@@ -187,7 +188,7 @@ export async function POST(request: NextRequest) {
 
     // Round 1: Initial answers
     if (round === 1) {
-      const results = await Promise.all(models.map((m) => askModel(m, question, clients)));
+      const results = await Promise.all(models.map((m) => askModel(m, question, clients, modelOverrides)));
       const responses: Record<string, ModelResponse> = {};
       for (const r of results) responses[r.modelKey] = r;
       return NextResponse.json({ responses });
@@ -203,7 +204,7 @@ export async function POST(request: NextRequest) {
       const reviewPrompt = t.reviewPrompt(allAnswers);
 
       const results = await Promise.all(
-        models.map((m) => askModel(m, reviewPrompt, clients))
+        models.map((m) => askModel(m, reviewPrompt, clients, modelOverrides))
       );
       const responses: Record<string, ModelResponse> = {};
       for (const r of results) responses[r.modelKey] = r;

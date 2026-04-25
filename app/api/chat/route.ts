@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { getApiModel, getDisplayName, SYNTHESIS_MODEL } from "@/app/config/models";
+import { getApiModel, getDisplayName, modelSupportsWebSearch, SYNTHESIS_MODEL } from "@/app/config/models";
 import {
   createApiClients,
   extractAnthropicText,
@@ -22,6 +22,7 @@ interface ChatRequest {
   messages: ChatMessage[];
   locale?: Locale;
   apiKeys?: ApiKeys;
+  modelOverrides?: Record<string, string>;
 }
 
 // ─── Web-search-enabled tool configs ────────────────────────────────────────
@@ -39,15 +40,16 @@ const GEMINI_SEARCH_CONFIG = {
 async function chatAnthropic(
   modelKey: string,
   messages: ChatMessage[],
-  clients: ApiClients
+  clients: ApiClients,
+  overrides?: Record<string, string>
 ): Promise<ModelResponse> {
-  const name = getDisplayName(modelKey);
+  const name = getDisplayName(modelKey, overrides);
   if (!clients.anthropicClient)
     return { modelKey, modelName: name, answer: "", error: "API key missing" };
 
   try {
     const response = await clients.anthropicClient.messages.create({
-      model: getApiModel(modelKey),
+      model: getApiModel(modelKey, overrides),
       max_tokens: 4000,
       tools: ANTHROPIC_TOOLS_BASIC,
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
@@ -67,18 +69,20 @@ async function chatAnthropic(
 async function chatOpenAI(
   modelKey: string,
   messages: ChatMessage[],
-  clients: ApiClients
+  clients: ApiClients,
+  overrides?: Record<string, string>
 ): Promise<ModelResponse> {
-  const name = getDisplayName(modelKey);
+  const name = getDisplayName(modelKey, overrides);
   if (!clients.openaiClient)
     return { modelKey, modelName: name, answer: "", error: "API key missing" };
 
   try {
+    const supportsSearch = modelSupportsWebSearch(modelKey, overrides);
     const response = await clients.openaiClient.chat.completions.create({
-      model: getApiModel(modelKey),
+      model: getApiModel(modelKey, overrides),
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
       max_completion_tokens: 4000,
-      web_search_options: {},
+      ...(supportsSearch ? { web_search_options: {} } : {}),
     });
     return {
       modelKey,
@@ -95,9 +99,10 @@ async function chatOpenAI(
 async function chatGemini(
   modelKey: string,
   messages: ChatMessage[],
-  clients: ApiClients
+  clients: ApiClients,
+  overrides?: Record<string, string>
 ): Promise<ModelResponse> {
-  const name = getDisplayName(modelKey);
+  const name = getDisplayName(modelKey, overrides);
   if (!clients.geminiClient)
     return { modelKey, modelName: name, answer: "", error: "API key missing" };
 
@@ -108,7 +113,7 @@ async function chatGemini(
     }));
 
     const response = await clients.geminiClient.models.generateContent({
-      model: getApiModel(modelKey),
+      model: getApiModel(modelKey, overrides),
       contents,
       config: GEMINI_SEARCH_CONFIG,
     });
@@ -157,7 +162,7 @@ async function chatAnthropicSynthesis(
 export async function POST(request: NextRequest) {
   try {
     const body: ChatRequest = await request.json();
-    const { model, messages, locale, apiKeys } = body;
+    const { model, messages, locale, apiKeys, modelOverrides } = body;
     const t = getTranslations(locale ?? "en");
     const clients = createApiClients(apiKeys);
 
@@ -172,13 +177,13 @@ export async function POST(request: NextRequest) {
 
     switch (model) {
       case "claude-haiku":
-        response = await chatAnthropic(model, messages, clients);
+        response = await chatAnthropic(model, messages, clients, modelOverrides);
         break;
       case "gpt-5-mini":
-        response = await chatOpenAI(model, messages, clients);
+        response = await chatOpenAI(model, messages, clients, modelOverrides);
         break;
       case "gemini":
-        response = await chatGemini(model, messages, clients);
+        response = await chatGemini(model, messages, clients, modelOverrides);
         break;
       case "synthesis":
         response = await chatAnthropicSynthesis(messages, clients);

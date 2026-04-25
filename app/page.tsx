@@ -2,7 +2,10 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
+import { useSession } from "next-auth/react";
 import { detectLocale, getTranslations, type Locale, type Translations } from "./i18n/translations";
+import { PROVIDER_MODEL_OPTIONS } from "./config/models";
+import AuthButton from "./components/auth-button";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -68,6 +71,7 @@ function toRequestApiKeys(apiKeys: ApiKeys) {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function DebateArena() {
+  const { data: session } = useSession();
   const [locale, setLocale] = useState<Locale>("en");
   const t = useMemo(() => getTranslations(locale), [locale]);
 
@@ -86,6 +90,13 @@ export default function DebateArena() {
   const [apiKeyDraft, setApiKeyDraft] = useState<ApiKeys>(EMPTY_API_KEYS);
   const [apiKeysLoaded, setApiKeysLoaded] = useState(false);
   const [apiKeyPanelOpen, setApiKeyPanelOpen] = useState(false);
+  const [modelOverrides, setModelOverrides] = useState<Record<string, string>>(() => {
+    const defaults: Record<string, string> = {};
+    for (const [key, options] of Object.entries(PROVIDER_MODEL_OPTIONS)) {
+      if (options[0]) defaults[key] = options[0].apiModel;
+    }
+    return defaults;
+  });
 
   // Session history (persisted to localStorage)
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -132,23 +143,42 @@ export default function DebateArena() {
     sessionsLoaded.current = true;
   }, []);
 
-  // Load provider API keys from this browser.
+  // Load API keys — Supabase if logged in, localStorage otherwise
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(API_KEYS_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as Partial<ApiKeys>;
-        const keys = {
-          anthropic: parsed.anthropic ?? "",
-          openai: parsed.openai ?? "",
-          google: parsed.google ?? "",
-        };
-        setApiKeys(keys);
-        setApiKeyDraft(keys);
-      }
-    } catch { /* ignore */ }
-    setApiKeysLoaded(true);
-  }, []);
+    if (session === undefined) return; // still loading
+    if (session) {
+      fetch("/api/user-keys")
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.keys) {
+            const keys = {
+              anthropic: data.keys.anthropic_key ?? "",
+              openai: data.keys.openai_key ?? "",
+              google: data.keys.google_key ?? "",
+            };
+            setApiKeys(keys);
+            setApiKeyDraft(keys);
+          }
+        })
+        .catch(() => {})
+        .finally(() => setApiKeysLoaded(true));
+    } else {
+      try {
+        const saved = localStorage.getItem(API_KEYS_STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved) as Partial<ApiKeys>;
+          const keys = {
+            anthropic: parsed.anthropic ?? "",
+            openai: parsed.openai ?? "",
+            google: parsed.google ?? "",
+          };
+          setApiKeys(keys);
+          setApiKeyDraft(keys);
+        }
+      } catch { /* ignore */ }
+      setApiKeysLoaded(true);
+    }
+  }, [session]);
 
   // Persist sessions to localStorage when they change
   useEffect(() => {
@@ -216,25 +246,41 @@ export default function DebateArena() {
     setApiKeyPanelOpen(true);
   }, [apiKeys]);
 
-  const saveApiKeys = () => {
+  const saveApiKeys = async () => {
     const keys = toRequestApiKeys(apiKeyDraft);
     setApiKeys(keys);
     setApiKeyDraft(keys);
-    localStorage.setItem(API_KEYS_STORAGE_KEY, JSON.stringify(keys));
     setApiKeyPanelOpen(false);
+    if (session) {
+      await fetch("/api/user-keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ anthropic: keys.anthropic, openai: keys.openai, google: keys.google }),
+      }).catch(() => {});
+    } else {
+      localStorage.setItem(API_KEYS_STORAGE_KEY, JSON.stringify(keys));
+    }
   };
 
-  const clearApiKeys = () => {
+  const clearApiKeys = async () => {
     setApiKeys(EMPTY_API_KEYS);
     setApiKeyDraft(EMPTY_API_KEYS);
-    localStorage.removeItem(API_KEYS_STORAGE_KEY);
     setApiKeyPanelOpen(false);
+    if (session) {
+      await fetch("/api/user-keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ anthropic: "", openai: "", google: "" }),
+      }).catch(() => {});
+    } else {
+      localStorage.removeItem(API_KEYS_STORAGE_KEY);
+    }
   };
 
   // ─── Compare Flow ──────────────────────────────────────────────────────────
 
   const startCompare = async () => {
-    if (!question.trim() || selectedModels.length === 0) return;
+    if (!question.trim() || selectedModels.length === 0 || loading) return;
     // Assign a new session ID for this comparison
     const newId = nextSessionId.current++;
     setActiveSessionId(newId);
@@ -260,6 +306,7 @@ export default function DebateArena() {
           round: 1,
           locale,
           apiKeys: toRequestApiKeys(apiKeys),
+          modelOverrides,
         }),
       });
       const data = await res.json();
@@ -322,6 +369,7 @@ export default function DebateArena() {
           messages: updatedHistory,
           locale,
           apiKeys: toRequestApiKeys(apiKeys),
+          modelOverrides,
         }),
       });
       const data = await res.json();
@@ -373,6 +421,7 @@ export default function DebateArena() {
           messages: updatedHistory,
           locale,
           apiKeys: toRequestApiKeys(apiKeys),
+          modelOverrides,
         }),
       });
       const data = await res.json();
@@ -429,6 +478,7 @@ export default function DebateArena() {
           round: 2,
           locale,
           apiKeys: toRequestApiKeys(apiKeys),
+          modelOverrides,
           previousResponses: enrichedResponses,
         }),
       });
@@ -447,6 +497,7 @@ export default function DebateArena() {
           round: 3,
           locale,
           apiKeys: toRequestApiKeys(apiKeys),
+          modelOverrides,
           previousResponses: data2.responses,
         }),
       });
@@ -669,6 +720,7 @@ export default function DebateArena() {
               >
                 API Keys{savedKeyCount > 0 ? ` · ${savedKeyCount}` : ""}
               </button>
+              <AuthButton />
             </div>
           </div>
         </header>
@@ -682,9 +734,9 @@ export default function DebateArena() {
           >
             <div
               id="api-key-panel"
-              className="w-full max-w-lg rounded-xl border border-[var(--border-dim)] bg-[var(--bg-surface)] shadow-2xl"
+              className="w-full max-w-lg rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] shadow-2xl"
             >
-              <div className="flex items-center justify-between border-b border-[var(--border-dim)] px-5 py-4">
+              <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-5 py-4">
                 <div>
                   <h2 id="api-key-panel-title" className="text-base font-bold text-[var(--text-primary)]">API Keys</h2>
                   <p className="mt-1 text-xs text-[var(--text-muted)]">
@@ -719,7 +771,7 @@ export default function DebateArena() {
                   onChange={(value) => setApiKeyDraft((prev) => ({ ...prev, google: value }))}
                 />
               </div>
-              <div className="flex items-center justify-between border-t border-[var(--border-dim)] px-5 py-4">
+              <div className="flex items-center justify-between border-t border-[var(--border-subtle)] px-5 py-4">
                 <button
                   type="button"
                   onClick={clearApiKeys}
@@ -784,44 +836,74 @@ export default function DebateArena() {
               {MODELS.map((model) => {
                 const isAvailable = availableModels?.[model.key] ?? false;
                 const selected = selectedModels.includes(model.key);
+                const options = PROVIDER_MODEL_OPTIONS[model.key] ?? [];
+                const currentOverride = modelOverrides[model.key] ?? options[0]?.apiModel ?? "";
                 return (
-                  <button
+                  <div
                     key={model.key}
-                    onClick={() => toggleModel(model.key)}
-                    disabled={!isAvailable}
-                    className="group relative rounded-xl border px-4 py-3.5 text-left transition-all duration-300 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="group relative rounded-xl border transition-all duration-300"
                     style={{
                       borderColor: selected ? model.color + "55" : "var(--border-dim)",
                       background: selected ? model.glow : "var(--bg-card)",
                       boxShadow: selected ? `0 0 20px ${model.color}10` : "none",
+                      opacity: isAvailable ? 1 : 0.4,
                     }}
                   >
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="w-3 h-3 rounded-full transition-all duration-300"
-                        style={{
-                          background: selected ? model.color : "var(--border-subtle)",
-                          boxShadow: selected ? `0 0 8px ${model.color}80` : "none",
-                        }}
-                      />
-                      <div>
-                        <span
-                          className="text-sm font-semibold transition-colors block"
-                          style={{ color: selected ? model.color : "var(--text-secondary)" }}
-                        >
-                          {model.name}
-                        </span>
-                        <span className="text-[10px] font-mono text-[var(--text-muted)]">
-                          {model.provider}
-                        </span>
+                    {/* Toggle area */}
+                    <button
+                      onClick={() => toggleModel(model.key)}
+                      disabled={!isAvailable}
+                      className="w-full px-4 pt-3.5 pb-2 text-left cursor-pointer disabled:cursor-not-allowed"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="w-3 h-3 rounded-full transition-all duration-300 shrink-0"
+                          style={{
+                            background: selected ? model.color : "var(--border-subtle)",
+                            boxShadow: selected ? `0 0 8px ${model.color}80` : "none",
+                          }}
+                        />
+                        <div>
+                          <span
+                            className="text-sm font-semibold transition-colors block"
+                            style={{ color: selected ? model.color : "var(--text-secondary)" }}
+                          >
+                            {model.provider}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                    {!isAvailable && (
-                      <span className="text-[10px] font-mono text-[var(--text-muted)] mt-1 block">
-                        {t.noApiKey}
-                      </span>
+                    </button>
+                    {/* Model selector */}
+                    {isAvailable && options.length > 1 && (
+                      <div className="px-3 pb-3">
+                        <select
+                          value={currentOverride}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            setModelOverrides((prev) => ({ ...prev, [model.key]: e.target.value }));
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-full rounded-md px-2 py-1.5 text-[11px] font-mono cursor-pointer focus:outline-none transition-colors"
+                          style={{
+                            background: "var(--bg-elevated)",
+                            border: `1px solid ${selected ? model.color + "44" : "var(--border-subtle)"}`,
+                            color: selected ? model.color : "var(--text-secondary)",
+                          }}
+                        >
+                          {options.map((opt) => (
+                            <option key={opt.apiModel} value={opt.apiModel}>
+                              {opt.displayName}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     )}
-                  </button>
+                    {!isAvailable && (
+                      <p className="text-[10px] font-mono text-[var(--text-muted)] px-4 pb-3">
+                        {t.noApiKey}
+                      </p>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -1322,7 +1404,7 @@ function ApiKeyInput({
 }) {
   return (
     <label className="block">
-      <span className="mb-2 block text-xs font-mono uppercase tracking-wider text-[var(--text-muted)]">
+      <span className="mb-2 block text-xs font-mono uppercase tracking-wider text-[var(--text-secondary)]">
         {label}
       </span>
       <input
@@ -1332,7 +1414,7 @@ function ApiKeyInput({
         autoComplete="off"
         spellCheck={false}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-lg border border-[var(--border-dim)] bg-[var(--bg-card)] px-4 py-3 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] transition-colors focus:border-blue-500/50 focus:outline-none"
+        className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-3 text-sm text-[var(--text-primary)] placeholder-[#444460] transition-colors focus:border-blue-500/70 focus:outline-none"
       />
     </label>
   );
