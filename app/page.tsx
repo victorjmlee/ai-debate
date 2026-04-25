@@ -71,7 +71,7 @@ function toRequestApiKeys(apiKeys: ApiKeys) {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function DebateArena() {
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
   const [locale, setLocale] = useState<Locale>("en");
   const t = useMemo(() => getTranslations(locale), [locale]);
 
@@ -187,6 +187,13 @@ export default function DebateArena() {
       localStorage.setItem("ai-debate-sessions", JSON.stringify(sessions));
     } catch { /* ignore — quota exceeded etc. */ }
   }, [sessions]);
+
+  // Auto-open API key panel when logged in but no keys saved
+  useEffect(() => {
+    if (!apiKeysLoaded || !session) return;
+    const hasKeys = Object.values(apiKeys).some((k) => k.trim());
+    if (!hasKeys) setApiKeyPanelOpen(true);
+  }, [apiKeysLoaded, session, apiKeys]);
 
   // Fetch available models from server env keys plus browser-saved personal keys.
   useEffect(() => {
@@ -576,6 +583,35 @@ export default function DebateArena() {
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
+  // 1) 세션 로딩 중
+  if (sessionStatus === "loading") {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-6 h-6 rounded-full border-2 border-blue-400 border-t-transparent animate-spin" />
+      </div>
+    );
+  }
+
+  // 2) 로그인 안 된 상태 → 로그인 유도
+  if (!session) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center px-6 text-center">
+        <h1 className="text-4xl font-extrabold tracking-tight mb-3">
+          <span className="bg-gradient-to-r from-blue-400 via-emerald-400 to-amber-400 bg-clip-text text-transparent">
+            AI Debate Arena
+          </span>
+        </h1>
+        <p className="text-sm font-mono text-[var(--text-muted)] tracking-widest uppercase mb-10">
+          Compare · Choose · Chat
+        </p>
+        <p className="text-[var(--text-secondary)] mb-8 max-w-sm">
+          Claude, GPT, Gemini에게 같은 질문을 던지고 답변을 비교해보세요.
+        </p>
+        <AuthButton />
+      </div>
+    );
+  }
+
   return (
     <div className="relative z-10 min-h-screen flex">
       {/* ── Sidebar ── */}
@@ -929,7 +965,7 @@ export default function DebateArena() {
           {/* Start Button */}
           <button
             onClick={startCompare}
-            disabled={!question.trim() || selectedModels.length === 0}
+            disabled={!question.trim() || selectedModels.length === 0 || !Object.values(apiKeys).some((k) => k.trim())}
             className="w-full relative overflow-hidden rounded-xl py-4 text-base font-bold tracking-wide transition-all duration-300 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
             style={{
               background: "linear-gradient(135deg, #3B82F6 0%, #10B981 50%, #F59E0B 100%)",
