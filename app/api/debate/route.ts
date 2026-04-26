@@ -35,6 +35,35 @@ const GEMINI_SEARCH_CONFIG = {
 
 const MAX_TOKENS = { round1: 2000, round2: 1200, round3: 2500, synthesis: 2500 } as const;
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function parseErrorMessage(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+  try {
+    const parsed = JSON.parse(raw);
+    const msg = parsed?.error?.message ?? parsed?.message;
+    if (msg) return msg;
+  } catch { /* not JSON */ }
+  return raw;
+}
+
+function isRetryable(e: unknown): boolean {
+  const msg = parseErrorMessage(e).toLowerCase();
+  return msg.includes("503") || msg.includes("unavailable") || msg.includes("overloaded") || msg.includes("high demand");
+}
+
+async function withRetry<T>(fn: () => Promise<T>, retries = 1, delayMs = 2000): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (retries > 0 && isRetryable(e)) {
+      await new Promise((r) => setTimeout(r, delayMs));
+      return withRetry(fn, retries - 1, delayMs);
+    }
+    throw e;
+  }
+}
+
 // ─── Model Callers ───────────────────────────────────────────────────────────
 
 async function askAnthropic(
@@ -63,8 +92,7 @@ async function askAnthropic(
       tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
     };
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return { modelKey, modelName: name, answer: "", error: msg };
+    return { modelKey, modelName: name, answer: "", error: parseErrorMessage(e) };
   }
 }
 
@@ -94,8 +122,7 @@ async function askOpenAI(
       tokensUsed: response.usage?.total_tokens,
     };
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return { modelKey, modelName: name, answer: "", error: msg };
+    return { modelKey, modelName: name, answer: "", error: parseErrorMessage(e) };
   }
 }
 
@@ -111,11 +138,13 @@ async function askGemini(
     return { modelKey, modelName: name, answer: "", error: "API key missing" };
 
   try {
-    const response = await clients.geminiClient.models.generateContent({
-      model: getApiModel(modelKey, overrides),
-      contents: prompt,
-      config: round === 1 ? GEMINI_SEARCH_CONFIG : {},
-    });
+    const response = await withRetry(() =>
+      clients.geminiClient!.models.generateContent({
+        model: getApiModel(modelKey, overrides),
+        contents: prompt,
+        config: round === 1 ? GEMINI_SEARCH_CONFIG : {},
+      })
+    );
     return {
       modelKey,
       modelName: name,
@@ -123,8 +152,7 @@ async function askGemini(
       tokensUsed: response.usageMetadata?.totalTokenCount,
     };
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return { modelKey, modelName: name, answer: "", error: msg };
+    return { modelKey, modelName: name, answer: "", error: parseErrorMessage(e) };
   }
 }
 
