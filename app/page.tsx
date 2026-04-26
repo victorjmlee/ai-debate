@@ -142,6 +142,8 @@ export default function DebateArena() {
   const [deepLoading, setDeepLoading] = useState(false);
   const [deepStep, setDeepStep] = useState<"idle" | "review" | "synthesis" | "done">("idle");
   const [toneInstruction, setToneInstruction] = useState("");
+  const [context, setContext] = useState("");
+  const [contextOpen, setContextOpen] = useState(false);
 
   // Synthesis chat
   const [synthesisChatHistory, setSynthesisChatHistory] = useState<ChatMessage[]>([]);
@@ -274,6 +276,9 @@ export default function DebateArena() {
 
   const startCompare = async () => {
     if (!question.trim() || selectedModels.length === 0 || loading) return;
+    const effectiveQuestion = context.trim()
+      ? `Background Context:\n${context.trim()}\n\n---\n\nQuestion / Request:\n${question.trim()}`
+      : question.trim();
     // Assign a new session ID for this comparison
     const newId = nextSessionId.current++;
     setActiveSessionId(newId);
@@ -294,7 +299,7 @@ export default function DebateArena() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          question,
+          question: effectiveQuestion,
           models: selectedModels,
           round: 1,
           locale,
@@ -556,6 +561,8 @@ export default function DebateArena() {
     saveCurrentSession();
     setViewMode("input");
     setQuestion("");
+    setContext("");
+    setContextOpen(false);
     setRound1(null);
     setRound2(null);
     setSynthesis(null);
@@ -806,6 +813,44 @@ export default function DebateArena() {
             </p>
           </div>
 
+          {/* Context (optional) */}
+          <div className="mb-4">
+            <button
+              onClick={() => setContextOpen(!contextOpen)}
+              className="flex items-center gap-2 text-xs font-mono tracking-wider uppercase transition-colors cursor-pointer mb-2 group"
+              style={{ color: contextOpen || context.trim() ? "#3B82F6" : "var(--text-muted)" }}
+            >
+              <span
+                className="transition-transform duration-200 text-[10px]"
+                style={{ display: "inline-block", transform: contextOpen ? "rotate(90deg)" : "rotate(0deg)" }}
+              >
+                ▶
+              </span>
+              {t.addContext}
+              {!contextOpen && context.trim() && (
+                <span className="rounded px-1.5 py-0.5 text-[10px] font-bold" style={{ background: "rgba(59,130,246,0.15)", color: "#3B82F6" }}>
+                  {locale === "ko" ? "입력됨" : "Added"}
+                </span>
+              )}
+            </button>
+            {contextOpen && (
+              <textarea
+                value={context}
+                onChange={(e) => setContext(e.target.value)}
+                placeholder={t.contextPlaceholder}
+                rows={6}
+                autoFocus
+                className="w-full rounded-xl px-5 py-4 text-sm placeholder-[var(--text-muted)] focus:outline-none transition-all resize-none"
+                style={{
+                  background: "var(--bg-card)",
+                  border: "1px solid #3B82F630",
+                  color: "var(--text-secondary)",
+                  boxShadow: "inset 0 1px 0 rgba(59,130,246,0.05)",
+                }}
+              />
+            )}
+          </div>
+
           {/* Question */}
           <div className="mb-8">
             <textarea
@@ -961,10 +1006,17 @@ export default function DebateArena() {
         <main className="flex-1 max-w-6xl mx-auto w-full px-6 py-8 animate-fade-up">
           {/* Question Display */}
           <div className="mb-6 bg-[var(--bg-card)] border border-[var(--border-dim)] rounded-xl px-6 py-4">
-            <span className="text-xs font-mono text-[var(--text-muted)] tracking-wider uppercase">
-              {t.question}
-            </span>
-            <p className="text-lg text-[var(--text-primary)] mt-1">{question}</p>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-xs font-mono text-[var(--text-muted)] tracking-wider uppercase">
+                {t.question}
+              </span>
+              {context.trim() && (
+                <span className="rounded px-1.5 py-0.5 text-[10px] font-mono font-bold" style={{ background: "rgba(59,130,246,0.15)", color: "#3B82F6" }}>
+                  + context
+                </span>
+              )}
+            </div>
+            <p className="text-lg text-[var(--text-primary)]">{question}</p>
           </div>
 
           {/* Model Response Cards */}

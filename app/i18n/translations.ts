@@ -96,6 +96,10 @@ Rules: No emojis. No tables. No code blocks. Do not copy original answers verbat
     followUpA: (content: string) => `[Follow-up A] ${content}`,
     followUpConversation: "--- Follow-up conversation ---",
 
+    // Context
+    addContext: "Add Context",
+    contextPlaceholder: "Paste customer ticket, Slack thread, issue description, or any relevant background...",
+
     // Tone selector
     toneLabel: "Response Tone",
     tonePlaceholder: "Custom style instructions (e.g. formal, concise, no jargon)...",
@@ -197,6 +201,10 @@ ${allReviews}
     followUpA: (content: string) => `[추가 답변] ${content}`,
     followUpConversation: "--- 추가 대화 ---",
 
+    // Context
+    addContext: "컨텍스트 추가",
+    contextPlaceholder: "고객 티켓, 슬랙 스레드, 이슈 내용 등 관련 배경을 붙여넣으세요...",
+
     // Tone selector
     toneLabel: "답변 어투",
     tonePlaceholder: "커스텀 스타일 지침 (예: 격식체, 간결하게, 전문용어 없이)...",
@@ -252,6 +260,8 @@ export type Translations = {
   followUpQ: (content: string) => string;
   followUpA: (content: string) => string;
   followUpConversation: string;
+  addContext: string;
+  contextPlaceholder: string;
   toneLabel: string;
   tonePlaceholder: string;
   apiKeyMissing: string;
