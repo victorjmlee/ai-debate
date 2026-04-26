@@ -822,53 +822,75 @@ export default function DebateArena() {
 
           {/* Model Selector */}
           <div className="mb-8">
-            <label className="block text-sm font-mono text-[var(--text-muted)] mb-4 tracking-wider uppercase">
-              Models
-            </label>
+            <div className="flex items-center justify-between mb-4">
+              <label className="text-sm font-mono text-[var(--text-muted)] tracking-wider uppercase">
+                Models
+              </label>
+              <span className="text-xs text-[var(--text-muted)]">
+                {selectedModels.length} / {MODELS.length} selected
+              </span>
+            </div>
             <div className="grid grid-cols-3 gap-3">
               {MODELS.map((model) => {
                 const isAvailable = availableModels?.[model.key] ?? false;
                 const selected = selectedModels.includes(model.key);
                 const options = PROVIDER_MODEL_OPTIONS[model.key] ?? [];
                 const currentOverride = modelOverrides[model.key] ?? options[0]?.apiModel ?? "";
+                const currentModelName = options.find((o) => o.apiModel === currentOverride)?.displayName ?? model.name;
                 return (
                   <div
                     key={model.key}
-                    className="group relative rounded-xl border transition-all duration-300"
+                    className="group relative rounded-xl border transition-all duration-300 overflow-hidden"
                     style={{
-                      borderColor: selected ? model.color + "55" : "var(--border-dim)",
-                      background: selected ? model.glow : "var(--bg-card)",
-                      boxShadow: selected ? `0 0 20px ${model.color}10` : "none",
-                      opacity: isAvailable ? 1 : 0.4,
+                      borderColor: selected ? model.color : "var(--border-dim)",
+                      background: selected
+                        ? `linear-gradient(160deg, ${model.color}18 0%, ${model.color}06 100%)`
+                        : "var(--bg-card)",
+                      boxShadow: selected ? `0 0 28px ${model.color}20, inset 0 1px 0 ${model.color}25` : "none",
+                      opacity: isAvailable ? 1 : 0.35,
                     }}
                   >
+                    {/* Colored top accent bar */}
+                    <div
+                      className="h-1 w-full transition-all duration-300"
+                      style={{ background: selected ? `linear-gradient(90deg, ${model.color}, ${model.color}88)` : "var(--border-dim)" }}
+                    />
                     {/* Toggle area */}
                     <button
                       onClick={() => toggleModel(model.key)}
                       disabled={!isAvailable}
-                      className="w-full px-4 pt-3.5 pb-2 text-left cursor-pointer disabled:cursor-not-allowed"
+                      className="w-full px-5 pt-4 pb-3 text-left cursor-pointer disabled:cursor-not-allowed"
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-start justify-between mb-3">
                         <div
-                          className="w-3 h-3 rounded-full transition-all duration-300 shrink-0"
+                          className="w-5 h-5 rounded-full flex items-center justify-center transition-all duration-300 shrink-0"
                           style={{
-                            background: selected ? model.color : "var(--border-subtle)",
-                            boxShadow: selected ? `0 0 8px ${model.color}80` : "none",
+                            background: selected ? model.color : "transparent",
+                            border: `2px solid ${selected ? model.color : "var(--border-subtle)"}`,
+                            boxShadow: selected ? `0 0 10px ${model.color}80` : "none",
                           }}
-                        />
-                        <div>
-                          <span
-                            className="text-sm font-semibold transition-colors block"
-                            style={{ color: selected ? model.color : "var(--text-secondary)" }}
-                          >
-                            {model.provider}
-                          </span>
+                        >
+                          {selected && <span className="text-[9px] font-bold text-white">✓</span>}
                         </div>
+                        {!isAvailable && (
+                          <span className="text-[9px] font-mono text-[var(--text-muted)] border border-[var(--border-dim)] rounded px-1.5 py-0.5">
+                            {t.noApiKey}
+                          </span>
+                        )}
                       </div>
+                      <span
+                        className="text-xl font-bold block transition-colors leading-tight"
+                        style={{ color: selected ? model.color : "var(--text-secondary)" }}
+                      >
+                        {model.provider}
+                      </span>
+                      <span className="text-xs text-[var(--text-muted)] mt-1 block font-mono">
+                        {currentModelName}
+                      </span>
                     </button>
-                    {/* Model selector */}
+                    {/* Model version selector */}
                     {isAvailable && options.length > 1 && (
-                      <div className="px-3 pb-3">
+                      <div className="px-4 pb-4">
                         <select
                           value={currentOverride}
                           onChange={(e) => {
@@ -890,11 +912,6 @@ export default function DebateArena() {
                           ))}
                         </select>
                       </div>
-                    )}
-                    {!isAvailable && (
-                      <p className="text-[10px] font-mono text-[var(--text-muted)] px-4 pb-3">
-                        {t.noApiKey}
-                      </p>
                     )}
                   </div>
                 );
@@ -1128,36 +1145,57 @@ export default function DebateArena() {
               </div>
 
               {/* Tone / Format Selector */}
-              <div className="mt-6 bg-[var(--bg-card)] border border-[var(--border-dim)] rounded-xl px-5 py-4">
-                <span className="text-xs font-mono text-[var(--text-muted)] tracking-wider uppercase block mb-3">
-                  {t.toneLabel}
-                </span>
-                <div className="flex flex-wrap gap-2 mb-3">
-                  {TONE_PRESETS.map((preset) => {
-                    const isActive = toneInstruction === preset.instruction;
-                    return (
-                      <button
-                        key={preset.id}
-                        onClick={() => setToneInstruction(isActive ? "" : preset.instruction)}
-                        className="rounded-lg px-3 py-1.5 text-xs font-mono transition-all cursor-pointer border"
-                        style={{
-                          borderColor: isActive ? "#D4AF37" : "var(--border-dim)",
-                          color: isActive ? "#D4AF37" : "var(--text-muted)",
-                          background: isActive ? "rgba(212,175,55,0.08)" : "transparent",
-                        }}
-                      >
-                        {preset.label[locale] ?? preset.label.en}
-                      </button>
-                    );
-                  })}
+              <div
+                className="mt-6 rounded-xl overflow-hidden"
+                style={{
+                  border: "1.5px solid #D4AF3740",
+                  background: "linear-gradient(135deg, rgba(212,175,55,0.07) 0%, rgba(212,175,55,0.02) 100%)",
+                  boxShadow: "0 0 24px rgba(212,175,55,0.06)",
+                }}
+              >
+                <div className="flex items-center gap-3 px-5 pt-4 pb-3 border-b" style={{ borderColor: "#D4AF3720" }}>
+                  <div className="w-2 h-2 rounded-full" style={{ background: "#D4AF37", boxShadow: "0 0 6px #D4AF3780" }} />
+                  <span className="text-sm font-bold" style={{ color: "#D4AF37" }}>
+                    {t.toneLabel}
+                  </span>
+                  <span className="text-xs text-[var(--text-muted)]">
+                    — {locale === "ko" ? "최종 합성 답변의 스타일을 선택하세요" : "how should the final synthesis read?"}
+                  </span>
                 </div>
-                <textarea
-                  value={toneInstruction}
-                  onChange={(e) => setToneInstruction(e.target.value)}
-                  placeholder={t.tonePlaceholder}
-                  rows={2}
-                  className="w-full bg-[var(--bg-elevated)] border border-[var(--border-dim)] rounded-lg px-3 py-2.5 text-sm text-[var(--text-secondary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[#D4AF3750] transition-all resize-none"
-                />
+                <div className="px-5 pt-4 pb-3">
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    {TONE_PRESETS.map((preset) => {
+                      const isActive = toneInstruction === preset.instruction;
+                      return (
+                        <button
+                          key={preset.id}
+                          onClick={() => setToneInstruction(isActive ? "" : preset.instruction)}
+                          className="rounded-lg px-4 py-3 text-sm font-semibold transition-all duration-200 cursor-pointer text-left"
+                          style={{
+                            border: `1.5px solid ${isActive ? "#D4AF37" : "var(--border-dim)"}`,
+                            color: isActive ? "#D4AF37" : "var(--text-secondary)",
+                            background: isActive ? "rgba(212,175,55,0.12)" : "var(--bg-elevated)",
+                            boxShadow: isActive ? "0 0 14px rgba(212,175,55,0.18)" : "none",
+                          }}
+                        >
+                          {preset.label[locale] ?? preset.label.en}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <textarea
+                    value={toneInstruction}
+                    onChange={(e) => setToneInstruction(e.target.value)}
+                    placeholder={t.tonePlaceholder}
+                    rows={2}
+                    className="w-full rounded-lg px-3 py-2.5 text-sm placeholder-[var(--text-muted)] focus:outline-none transition-all resize-none"
+                    style={{
+                      background: "var(--bg-elevated)",
+                      border: "1px solid #D4AF3730",
+                      color: "var(--text-secondary)",
+                    }}
+                  />
+                </div>
               </div>
 
               {/* Deep Analysis Button */}
