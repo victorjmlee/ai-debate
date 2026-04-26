@@ -978,7 +978,7 @@ export default function DebateArena() {
           {/* Start Button */}
           <button
             onClick={startCompare}
-            disabled={!question.trim() || selectedModels.length === 0 || !Object.values(apiKeys).some((k) => k.trim())}
+            disabled={!question.trim() || selectedModels.length === 0 || availableModels === null || !Object.values(availableModels).some((v) => v)}
             className="w-full relative overflow-hidden rounded-xl py-4 text-base font-bold tracking-wide transition-all duration-300 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
             style={{
               background: "linear-gradient(135deg, #3B82F6 0%, #10B981 50%, #F59E0B 100%)",
