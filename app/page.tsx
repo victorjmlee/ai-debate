@@ -192,12 +192,6 @@ export default function DebateArena() {
     } catch { /* ignore — quota exceeded etc. */ }
   }, [sessions]);
 
-  // Auto-open API key panel when no keys saved
-  useEffect(() => {
-    if (!apiKeysLoaded) return;
-    const hasKeys = Object.values(apiKeys).some((k) => k.trim());
-    if (!hasKeys) setApiKeyPanelOpen(true);
-  }, [apiKeysLoaded, apiKeys]);
 
   // Fetch available models from server env keys plus browser-saved personal keys.
   useEffect(() => {
