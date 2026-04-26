@@ -20,6 +20,7 @@ interface DebateRequest {
   apiKeys?: ApiKeys;
   modelOverrides?: Record<string, string>;
   previousResponses?: Record<string, ModelResponse>;
+  toneInstruction?: string;
 }
 
 // ─── Web-search-enabled tool configs ────────────────────────────────────────
@@ -175,7 +176,7 @@ async function askSynthesisModel(prompt: string, clients: ApiClients): Promise<M
 export async function POST(request: NextRequest) {
   try {
     const body: DebateRequest = await request.json();
-    const { question, models, round, previousResponses, locale, apiKeys, modelOverrides } = body;
+    const { question, models, round, previousResponses, locale, apiKeys, modelOverrides, toneInstruction } = body;
     const t = getTranslations(locale ?? "en");
     const clients = createApiClients(apiKeys);
 
@@ -218,7 +219,10 @@ export async function POST(request: NextRequest) {
         .map((r) => `${t.finalOpinionLabel(r.modelName)}\n${r.answer}`)
         .join("\n\n");
 
-      const synthesisPrompt = t.synthesisPrompt(question, allReviews);
+      let synthesisPrompt = t.synthesisPrompt(question, allReviews);
+      if (toneInstruction?.trim()) {
+        synthesisPrompt += `\n\nTone/Style instruction: ${toneInstruction.trim()}`;
+      }
 
       const result = await askSynthesisModel(synthesisPrompt, clients);
       return NextResponse.json({ synthesis: result });

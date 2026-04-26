@@ -2,10 +2,8 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
-import { useSession } from "next-auth/react";
 import { detectLocale, getTranslations, type Locale, type Translations } from "./i18n/translations";
 import { PROVIDER_MODEL_OPTIONS } from "./config/models";
-import AuthButton from "./components/auth-button";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -55,6 +53,29 @@ const MODELS: ModelOption[] = [
   { key: "gemini", name: "Gemini 2.5 Flash", provider: "Google", color: "#F59E0B", glow: "rgba(245,158,11,0.15)" },
 ];
 
+const TONE_PRESETS = [
+  {
+    id: "technical",
+    label: { en: "Technical", ko: "기술적" },
+    instruction: "Write in a technical, detailed style. Include specific steps, commands, or relevant implementation details.",
+  },
+  {
+    id: "concise",
+    label: { en: "Concise", ko: "간결하게" },
+    instruction: "Be extremely concise. Use bullet points. Limit to 5 key points. No filler.",
+  },
+  {
+    id: "customer",
+    label: { en: "Customer-facing", ko: "고객 대응용" },
+    instruction: "Write in a professional, empathetic tone for customer communication. Avoid technical jargon. Be clear, reassuring, and actionable.",
+  },
+  {
+    id: "executive",
+    label: { en: "Executive", ko: "임원 보고용" },
+    instruction: "Write an executive summary. Lead with the key recommendation. Keep it under 3 concise paragraphs.",
+  },
+] as const;
+
 type ViewMode = "input" | "compare" | "deep-analysis";
 
 const API_KEYS_STORAGE_KEY = "ai-debate-api-keys";
@@ -71,7 +92,6 @@ function toRequestApiKeys(apiKeys: ApiKeys) {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function DebateArena() {
-  const { data: session, status: sessionStatus } = useSession();
   const [locale, setLocale] = useState<Locale>("en");
   const t = useMemo(() => getTranslations(locale), [locale]);
 
@@ -121,6 +141,7 @@ export default function DebateArena() {
   const [synthesis, setSynthesis] = useState<ModelResponse | null>(null);
   const [deepLoading, setDeepLoading] = useState(false);
   const [deepStep, setDeepStep] = useState<"idle" | "review" | "synthesis" | "done">("idle");
+  const [toneInstruction, setToneInstruction] = useState("");
 
   // Synthesis chat
   const [synthesisChatHistory, setSynthesisChatHistory] = useState<ChatMessage[]>([]);
@@ -143,42 +164,23 @@ export default function DebateArena() {
     sessionsLoaded.current = true;
   }, []);
 
-  // Load API keys — Supabase if logged in, localStorage otherwise
+  // Load API keys from localStorage
   useEffect(() => {
-    if (session === undefined) return; // still loading
-    if (session) {
-      fetch("/api/user-keys")
-        .then((r) => r.json())
-        .then((data) => {
-          if (data.keys) {
-            const keys = {
-              anthropic: data.keys.anthropic_key ?? "",
-              openai: data.keys.openai_key ?? "",
-              google: data.keys.google_key ?? "",
-            };
-            setApiKeys(keys);
-            setApiKeyDraft(keys);
-          }
-        })
-        .catch(() => {})
-        .finally(() => setApiKeysLoaded(true));
-    } else {
-      try {
-        const saved = localStorage.getItem(API_KEYS_STORAGE_KEY);
-        if (saved) {
-          const parsed = JSON.parse(saved) as Partial<ApiKeys>;
-          const keys = {
-            anthropic: parsed.anthropic ?? "",
-            openai: parsed.openai ?? "",
-            google: parsed.google ?? "",
-          };
-          setApiKeys(keys);
-          setApiKeyDraft(keys);
-        }
-      } catch { /* ignore */ }
-      setApiKeysLoaded(true);
-    }
-  }, [session]);
+    try {
+      const saved = localStorage.getItem(API_KEYS_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as Partial<ApiKeys>;
+        const keys = {
+          anthropic: parsed.anthropic ?? "",
+          openai: parsed.openai ?? "",
+          google: parsed.google ?? "",
+        };
+        setApiKeys(keys);
+        setApiKeyDraft(keys);
+      }
+    } catch { /* ignore */ }
+    setApiKeysLoaded(true);
+  }, []);
 
   // Persist sessions to localStorage when they change
   useEffect(() => {
@@ -188,12 +190,12 @@ export default function DebateArena() {
     } catch { /* ignore — quota exceeded etc. */ }
   }, [sessions]);
 
-  // Auto-open API key panel when logged in but no keys saved
+  // Auto-open API key panel when no keys saved
   useEffect(() => {
-    if (!apiKeysLoaded || !session) return;
+    if (!apiKeysLoaded) return;
     const hasKeys = Object.values(apiKeys).some((k) => k.trim());
     if (!hasKeys) setApiKeyPanelOpen(true);
-  }, [apiKeysLoaded, session, apiKeys]);
+  }, [apiKeysLoaded, apiKeys]);
 
   // Fetch available models from server env keys plus browser-saved personal keys.
   useEffect(() => {
@@ -258,30 +260,14 @@ export default function DebateArena() {
     setApiKeys(keys);
     setApiKeyDraft(keys);
     setApiKeyPanelOpen(false);
-    if (session) {
-      await fetch("/api/user-keys", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ anthropic: keys.anthropic, openai: keys.openai, google: keys.google }),
-      }).catch(() => {});
-    } else {
-      localStorage.setItem(API_KEYS_STORAGE_KEY, JSON.stringify(keys));
-    }
+    localStorage.setItem(API_KEYS_STORAGE_KEY, JSON.stringify(keys));
   };
 
   const clearApiKeys = async () => {
     setApiKeys(EMPTY_API_KEYS);
     setApiKeyDraft(EMPTY_API_KEYS);
     setApiKeyPanelOpen(false);
-    if (session) {
-      await fetch("/api/user-keys", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ anthropic: "", openai: "", google: "" }),
-      }).catch(() => {});
-    } else {
-      localStorage.removeItem(API_KEYS_STORAGE_KEY);
-    }
+    localStorage.removeItem(API_KEYS_STORAGE_KEY);
   };
 
   // ─── Compare Flow ──────────────────────────────────────────────────────────
@@ -506,6 +492,7 @@ export default function DebateArena() {
           apiKeys: toRequestApiKeys(apiKeys),
           modelOverrides,
           previousResponses: data2.responses,
+          toneInstruction: toneInstruction.trim() || undefined,
         }),
       });
       const data3 = await res3.json();
@@ -582,35 +569,6 @@ export default function DebateArena() {
   };
 
   // ─── Render ────────────────────────────────────────────────────────────────
-
-  // 1) 세션 로딩 중
-  if (sessionStatus === "loading") {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-6 h-6 rounded-full border-2 border-blue-400 border-t-transparent animate-spin" />
-      </div>
-    );
-  }
-
-  // 2) 로그인 안 된 상태 → 로그인 유도
-  if (!session) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center px-6 text-center">
-        <h1 className="text-4xl font-extrabold tracking-tight mb-3">
-          <span className="bg-gradient-to-r from-blue-400 via-emerald-400 to-amber-400 bg-clip-text text-transparent">
-            AI Debate Arena
-          </span>
-        </h1>
-        <p className="text-sm font-mono text-[var(--text-muted)] tracking-widest uppercase mb-10">
-          Compare · Choose · Chat
-        </p>
-        <p className="text-[var(--text-secondary)] mb-8 max-w-sm">
-          Claude, GPT, Gemini에게 같은 질문을 던지고 답변을 비교해보세요.
-        </p>
-        <AuthButton />
-      </div>
-    );
-  }
 
   return (
     <div className="relative z-10 min-h-screen flex">
@@ -756,7 +714,6 @@ export default function DebateArena() {
               >
                 API Keys{savedKeyCount > 0 ? ` · ${savedKeyCount}` : ""}
               </button>
-              <AuthButton />
             </div>
           </div>
         </header>
@@ -1170,8 +1127,41 @@ export default function DebateArena() {
                 })}
               </div>
 
+              {/* Tone / Format Selector */}
+              <div className="mt-6 bg-[var(--bg-card)] border border-[var(--border-dim)] rounded-xl px-5 py-4">
+                <span className="text-xs font-mono text-[var(--text-muted)] tracking-wider uppercase block mb-3">
+                  {t.toneLabel}
+                </span>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {TONE_PRESETS.map((preset) => {
+                    const isActive = toneInstruction === preset.instruction;
+                    return (
+                      <button
+                        key={preset.id}
+                        onClick={() => setToneInstruction(isActive ? "" : preset.instruction)}
+                        className="rounded-lg px-3 py-1.5 text-xs font-mono transition-all cursor-pointer border"
+                        style={{
+                          borderColor: isActive ? "#D4AF37" : "var(--border-dim)",
+                          color: isActive ? "#D4AF37" : "var(--text-muted)",
+                          background: isActive ? "rgba(212,175,55,0.08)" : "transparent",
+                        }}
+                      >
+                        {preset.label[locale] ?? preset.label.en}
+                      </button>
+                    );
+                  })}
+                </div>
+                <textarea
+                  value={toneInstruction}
+                  onChange={(e) => setToneInstruction(e.target.value)}
+                  placeholder={t.tonePlaceholder}
+                  rows={2}
+                  className="w-full bg-[var(--bg-elevated)] border border-[var(--border-dim)] rounded-lg px-3 py-2.5 text-sm text-[var(--text-secondary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[#D4AF3750] transition-all resize-none"
+                />
+              </div>
+
               {/* Deep Analysis Button */}
-              <div className="mt-6">
+              <div className="mt-3">
                 <button
                   onClick={startDeepAnalysis}
                   className="w-full rounded-xl py-4 text-sm font-bold transition-all duration-300 cursor-pointer border-2"

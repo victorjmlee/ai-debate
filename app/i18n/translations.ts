@@ -96,6 +96,10 @@ Rules: No emojis. No tables. No code blocks. Do not copy original answers verbat
     followUpA: (content: string) => `[Follow-up A] ${content}`,
     followUpConversation: "--- Follow-up conversation ---",
 
+    // Tone selector
+    toneLabel: "Response Tone",
+    tonePlaceholder: "Custom style instructions (e.g. formal, concise, no jargon)...",
+
     // API errors
     apiKeyMissing: "API key missing",
     unknownModel: "Unknown model",
@@ -193,6 +197,10 @@ ${allReviews}
     followUpA: (content: string) => `[추가 답변] ${content}`,
     followUpConversation: "--- 추가 대화 ---",
 
+    // Tone selector
+    toneLabel: "답변 어투",
+    tonePlaceholder: "커스텀 스타일 지침 (예: 격식체, 간결하게, 전문용어 없이)...",
+
     apiKeyMissing: "API 키 없음",
     unknownModel: "알 수 없는 모델",
     pleaseEnterQuestion: "질문을 입력해주세요.",
@@ -244,6 +252,8 @@ export type Translations = {
   followUpQ: (content: string) => string;
   followUpA: (content: string) => string;
   followUpConversation: string;
+  toneLabel: string;
+  tonePlaceholder: string;
   apiKeyMissing: string;
   unknownModel: string;
   pleaseEnterQuestion: string;
