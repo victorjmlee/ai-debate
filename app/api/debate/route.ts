@@ -25,13 +25,15 @@ interface DebateRequest {
 
 // ─── Web-search-enabled tool configs ────────────────────────────────────────
 
-const ANTHROPIC_TOOLS_BASIC: Anthropic.Messages.ToolUnion[] = [
-  { type: "web_search_20250305", name: "web_search", max_uses: 3 },
+const ANTHROPIC_SEARCH_TOOLS: Anthropic.Messages.ToolUnion[] = [
+  { type: "web_search_20250305", name: "web_search", max_uses: 2 },
 ];
 
 const GEMINI_SEARCH_CONFIG = {
   tools: [{ googleSearch: {} }],
 };
+
+const MAX_TOKENS = { round1: 2000, round2: 1200, round3: 2500, synthesis: 2500 } as const;
 
 // ─── Model Callers ───────────────────────────────────────────────────────────
 
@@ -39,17 +41,19 @@ async function askAnthropic(
   modelKey: string,
   prompt: string,
   clients: ApiClients,
-  overrides?: Record<string, string>
+  overrides?: Record<string, string>,
+  round: 1 | 2 | 3 = 1
 ): Promise<ModelResponse> {
   const name = getDisplayName(modelKey, overrides);
   if (!clients.anthropicClient)
     return { modelKey, modelName: name, answer: "", error: "API key missing" };
 
   try {
+    const useSearch = round === 1;
     const response = await clients.anthropicClient.messages.create({
       model: getApiModel(modelKey, overrides),
-      max_tokens: 4000,
-      tools: ANTHROPIC_TOOLS_BASIC,
+      max_tokens: MAX_TOKENS[`round${round}`],
+      ...(useSearch ? { tools: ANTHROPIC_SEARCH_TOOLS } : {}),
       messages: [{ role: "user", content: prompt }],
     });
     return {
@@ -68,19 +72,20 @@ async function askOpenAI(
   modelKey: string,
   prompt: string,
   clients: ApiClients,
-  overrides?: Record<string, string>
+  overrides?: Record<string, string>,
+  round: 1 | 2 | 3 = 1
 ): Promise<ModelResponse> {
   const name = getDisplayName(modelKey, overrides);
   if (!clients.openaiClient)
     return { modelKey, modelName: name, answer: "", error: "API key missing" };
 
   try {
-    const supportsSearch = modelSupportsWebSearch(modelKey, overrides);
+    const useSearch = round === 1 && modelSupportsWebSearch(modelKey, overrides);
     const response = await clients.openaiClient.chat.completions.create({
       model: getApiModel(modelKey, overrides),
       messages: [{ role: "user", content: prompt }],
-      max_completion_tokens: 4000,
-      ...(supportsSearch ? { web_search_options: {} } : {}),
+      max_completion_tokens: MAX_TOKENS[`round${round}`],
+      ...(useSearch ? { web_search_options: {} } : {}),
     });
     return {
       modelKey,
@@ -98,7 +103,8 @@ async function askGemini(
   modelKey: string,
   prompt: string,
   clients: ApiClients,
-  overrides?: Record<string, string>
+  overrides?: Record<string, string>,
+  round: 1 | 2 | 3 = 1
 ): Promise<ModelResponse> {
   const name = getDisplayName(modelKey, overrides);
   if (!clients.geminiClient)
@@ -108,7 +114,7 @@ async function askGemini(
     const response = await clients.geminiClient.models.generateContent({
       model: getApiModel(modelKey, overrides),
       contents: prompt,
-      config: GEMINI_SEARCH_CONFIG,
+      config: round === 1 ? GEMINI_SEARCH_CONFIG : {},
     });
     return {
       modelKey,
@@ -128,15 +134,16 @@ async function askModel(
   modelKey: string,
   prompt: string,
   clients: ApiClients,
-  overrides?: Record<string, string>
+  overrides?: Record<string, string>,
+  round: 1 | 2 | 3 = 1
 ): Promise<ModelResponse> {
   switch (modelKey) {
     case "claude-haiku":
-      return askAnthropic(modelKey, prompt, clients, overrides);
+      return askAnthropic(modelKey, prompt, clients, overrides, round);
     case "gpt-5-mini":
-      return askOpenAI(modelKey, prompt, clients, overrides);
+      return askOpenAI(modelKey, prompt, clients, overrides, round);
     case "gemini":
-      return askGemini(modelKey, prompt, clients, overrides);
+      return askGemini(modelKey, prompt, clients, overrides, round);
     default:
       return { modelKey, modelName: modelKey, answer: "", error: "Unknown model" };
   }
@@ -150,8 +157,8 @@ async function askSynthesisModel(prompt: string, clients: ApiClients): Promise<M
   try {
     const response = await clients.anthropicClient.messages.create({
       model: SYNTHESIS_MODEL.apiModel,
-      max_tokens: 4000,
-      tools: ANTHROPIC_TOOLS_BASIC,
+      max_tokens: MAX_TOKENS.synthesis,
+      tools: ANTHROPIC_SEARCH_TOOLS,
       messages: [{ role: "user", content: prompt }],
     });
     return {
@@ -189,7 +196,7 @@ export async function POST(request: NextRequest) {
 
     // Round 1: Initial answers
     if (round === 1) {
-      const results = await Promise.all(models.map((m) => askModel(m, question, clients, modelOverrides)));
+      const results = await Promise.all(models.map((m) => askModel(m, question, clients, modelOverrides, 1)));
       const responses: Record<string, ModelResponse> = {};
       for (const r of results) responses[r.modelKey] = r;
       return NextResponse.json({ responses });
@@ -205,7 +212,7 @@ export async function POST(request: NextRequest) {
       const reviewPrompt = t.reviewPrompt(allAnswers);
 
       const results = await Promise.all(
-        models.map((m) => askModel(m, reviewPrompt, clients, modelOverrides))
+        models.map((m) => askModel(m, reviewPrompt, clients, modelOverrides, 2))
       );
       const responses: Record<string, ModelResponse> = {};
       for (const r of results) responses[r.modelKey] = r;
