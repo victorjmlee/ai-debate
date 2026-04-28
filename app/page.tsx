@@ -166,6 +166,13 @@ export default function DebateArena() {
     sessionsLoaded.current = true;
   }, []);
 
+  // Auto-open API key panel when no keys saved
+  useEffect(() => {
+    if (!apiKeysLoaded) return;
+    const hasKeys = Object.values(apiKeys).some((k) => k.trim());
+    if (!hasKeys) setApiKeyPanelOpen(true);
+  }, [apiKeysLoaded, apiKeys]);
+
   // Load API keys from localStorage
   useEffect(() => {
     try {
